@@ -408,6 +408,7 @@ pub(crate) fn spawn_server(inner: Arc<Inner>, listener: tokio::net::TcpListener)
     let app = Router::new()
         .route("/s/{id}/r/{name}", get(resource).options(preflight))
         .route("/s/{id}/{name}", get(root).options(preflight))
+        .route("/yt", get(crate::embed::serve))
         .fallback(|| async { StatusCode::NOT_FOUND })
         .with_state(inner);
     tokio::spawn(async move {
@@ -420,7 +421,7 @@ pub(crate) fn spawn_server(inner: Arc<Inner>, listener: tokio::net::TcpListener)
     });
 }
 
-fn host_ok(inner: &Inner, headers: &HeaderMap) -> bool {
+pub(crate) fn host_ok(inner: &Inner, headers: &HeaderMap) -> bool {
     let port = inner.addr.port();
     match headers.get(header::HOST).and_then(|h| h.to_str().ok()) {
         Some(h) => h == format!("127.0.0.1:{port}") || h == format!("localhost:{port}"),

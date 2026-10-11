@@ -7,6 +7,7 @@ import { tone } from "../lib/monogram";
 import { minutesLeft } from "../lib/time";
 import { useApp } from "../state/app";
 import { useLoad } from "../state/hooks";
+import { episodeTitle, resumeFraction } from "../player/vodLogic";
 
 /** The episode to resume: the first one started but not finished, else the one after the last finished. */
 export function resumeEpisode(info: SeriesInfo): Episode | null {
@@ -28,7 +29,7 @@ export function SeriesDetail({ id }: { id: string }) {
     if (info && season === null) setSeason(resume?.season ?? info.seasons[0]?.number ?? 1);
   }, [info, resume, season]);
   const eps = info?.seasons.find((s) => s.number === season)?.episodes ?? [];
-  const play = (e: Episode) => navigate({ name: "player", target: { type: "episode", id: e.id }, resume: e.progress && e.progress < 0.95 ? e.progress : undefined, title: `${info?.name ?? ""} · S${e.season} · E${e.episode}` });
+  const play = (e: Episode) => navigate({ name: "player", target: { type: "episode", id: e.id }, resume: resumeFraction(e.progress), title: episodeTitle(info?.name ?? "", e) });
   const years = info?.year ? String(info.year) : null;
 
   return (

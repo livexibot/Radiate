@@ -9,12 +9,18 @@ import { monogram, tone } from "../lib/monogram";
 import { clock, duration, progressOf, timeRange } from "../lib/time";
 import { backPress, emptyEntry, entryNumber, isDue, nextPrevious, pushDigit, popDigit, wrapIndex, type NumberEntry } from "../lib/zap";
 import { FailCard, LimitCard, MpvCard, UnsupportedCard } from "../player/Cards";
+import { NextEpisodeCard, useNextEpisode } from "../player/NextEpisode";
+import { episodeTitle, nextPhase, playerKeyAction, resumeFraction, seekTarget, shouldSaveProgress, type FocusKind } from "../player/vodLogic";
 import { StatsPill } from "../player/StatsPill";
 import { restart } from "../player/streams";
 import { matchTrack, TrackMenu } from "../player/TrackMenu";
 import { useStream } from "../player/useStream";
 import { useZapList } from "../player/useZapList";
 import { VideoSurface, type FatalInfo, type MediaControl, type Tracks, type VideoStats } from "../player/VideoSurface";
+import { ReactorIcon } from "../reactor/icon";
+import { ReactorMenu } from "../reactor/ReactorMenu";
+import { ReactorOverlay } from "../reactor/ReactorOverlay";
+import { reactorSession, useReactors } from "../reactor/useReactors";
 import { useApp, type Route, type ZapContext } from "../state/app";
 import { useChannelActions } from "../state/channelActions";
 import { useNow } from "../state/hooks";
@@ -38,6 +44,23 @@ async function toggleFullscreen() {
 
 const noTracks: Tracks = { audio: [], subtitles: [], audioId: 0, subtitleId: -1 };
 
+/** What has focus, for the player keys: a control only counts when it was reached with the keyboard. */
+function focusKind(active: Element | null, root: HTMLElement | null): FocusKind {
+  if (!(active instanceof HTMLElement) || active === document.body || active === root) return "none";
+  if (active instanceof HTMLInputElement) {
+    if (active.type !== "range") return "text";
+    return active.classList.contains("seek") ? "seek" : "slider";
+  }
+  if (active instanceof HTMLTextAreaElement || active.isContentEditable) return "text";
+  let keyboard = true;
+  try {
+    keyboard = active.matches(":focus-visible");
+  } catch {
+    /* older engines: treat focus as keyboard focus */
+  }
+  return keyboard ? "control" : "none";
+}
+
 export function Player({ route }: { route: PlayerRoute }) {
   const { navigate, back, prefs, setPrefs, toast, version } = useApp();
   const target = route.target;
@@ -53,7 +76,10 @@ export function Player({ route }: { route: PlayerRoute }) {
   const [statsOn, setStatsOn] = useState(prefs?.showStats ?? false);
   const [stats, setStats] = useState<VideoStats | null>(null);
   const [tracks, setTracks] = useState<Tracks>(noTracks);
-  const [menu, setMenu] = useState<"audio" | "subtitles" | null>(null);
+  const [menu, setMenu] = useState<"audio" | "subtitles" | "reactor" | null>(null);
+  const reactors = useReactors();
+  const [reactorId, setReactorId] = useState<string | null>(() => (isChannel ? reactorSession.get() : null));
+  const [hold, setHold] = useState<number | null>(null);
   const [ctxMenu, setCtxMenu] = useState<MenuState | null>(null);
   const [listOpen, setListOpen] = useState(false);
   const [listFocus, setListFocus] = useState(0);
@@ -61,6 +87,10 @@ export function Player({ route }: { route: PlayerRoute }) {
   const [zapFlash, setZapFlash] = useState(0);
   const [paused, setPaused] = useState(false);
   const [time, setTime] = useState<{ cur: number; dur: number }>({ cur: 0, dur: 0 });
+  const [ended, setEnded] = useState(false);
+  const [nextCancelled, setNextCancelled] = useState(false);
+  const [scrub, setScrub] = useState<number | null>(null);
+  const scrubTimer = useRef<number | null>(null);
   const [alternate, setAlternate] = useState<Channel | null>(null);
   const control = useRef<MediaControl | null>(null);
   const hideTimer = useRef<number | null>(null);
@@ -86,6 +116,11 @@ export function Player({ route }: { route: PlayerRoute }) {
     setStats(null);
     setTracks(noTracks);
     setAlternate(null);
+    setTime({ cur: 0, dur: 0 });
+    setEnded(false);
+    setNextCancelled(false);
+    setScrub(null);
+    setPaused(false);
     appliedPrefFor.current = null;
   }, [tkey]);
 
@@ -140,23 +175,58 @@ export function Player({ route }: { route: PlayerRoute }) {
       if (hideTimer.current) window.clearTimeout(hideTimer.current);
     };
   }, [poke]);
+  const reactor = isChannel && reactorId ? (reactors.reactors.find((r) => r.id === reactorId) ?? null) : null;
+  const pickReactor = useCallback((id: string | null) => {
+    setReactorId(id);
+    reactorSession.set(id);
+    if (id) reactorSession.setLast(id);
+  }, []);
+  const toggleReactor = useCallback(() => {
+    if (reactor) {
+      pickReactor(null);
+      return;
+    }
+    const last = reactorSession.last();
+    const saved = reactors.reactors.find((r) => r.id === last) ?? reactors.reactors[0];
+    if (saved) pickReactor(saved.id);
+    else setMenu("reactor");
+  }, [reactor, reactors.reactors, pickReactor]);
   const keepChrome = menu !== null || listOpen || ctxMenu !== null || state.status !== "ready" || !!fatal || paused;
 
-  // VOD progress: every 10 s and on stop
-  const timeRef = useRef(time);
-  timeRef.current = time;
+  // VOD progress: every 10 s, on pause, at the end and on stop. Read from the video element
+  // itself, so a position never lands on the wrong item while one episode hands over to the next.
+  const saveProgress = useRef<() => void>(() => undefined);
   useEffect(() => {
     if (isChannel) return;
+    const id = target.id;
     const save = () => {
-      const t = timeRef.current;
-      if (t.dur > 0 && t.cur > 0) void api.progressSet(target.id, t.cur, t.dur).catch(() => undefined);
+      const v = control.current?.video;
+      if (v && shouldSaveProgress(v.currentTime, v.duration)) void api.progressSet(id, v.currentTime, v.duration).catch(() => undefined);
     };
+    saveProgress.current = save;
     const iv = window.setInterval(save, 10_000);
     return () => {
       window.clearInterval(iv);
       save();
+      saveProgress.current = () => undefined;
     };
   }, [isChannel, target.id]);
+
+  // next episode
+  const nextUp = useNextEpisode(target);
+  const phase = nextPhase({ hasNext: !!nextUp && !fatal && state.status === "ready", current: time.cur, duration: time.dur, ended, cancelled: nextCancelled });
+  const playNext = useCallback(() => {
+    if (!nextUp) return;
+    const e = nextUp.episode;
+    navigate({ name: "player", target: { type: "episode", id: e.id }, resume: resumeFraction(e.progress), title: episodeTitle(nextUp.seriesName, e) }, { replace: true });
+  }, [nextUp, navigate]);
+
+  const seekTo = useCallback((secs: number) => {
+    const v = control.current?.video;
+    if (!v) return;
+    v.currentTime = secs;
+    setTime((t) => ({ ...t, cur: secs }));
+  }, []);
 
   // another source for the same channel name
   useEffect(() => {
@@ -247,17 +317,23 @@ export function Player({ route }: { route: PlayerRoute }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
       const active = document.activeElement;
-      const inControl = active instanceof HTMLElement && active !== document.body && active !== rootRef.current;
-      if (active instanceof HTMLInputElement && active.type !== "range") return;
+      const focus = focusKind(active, rootRef.current);
+      const inControl = focus !== "none";
+      if (focus === "text") return;
       poke();
       if (listOpen || ctxMenu || menu) {
         if ((e.key === "Escape" || e.key === "Backspace") && listOpen) {
           e.preventDefault();
           setListOpen(false);
+        } else if (e.key === "Escape" && menu) {
+          // The menus close themselves when they have focus; this covers focus left elsewhere.
+          e.preventDefault();
+          setMenu(null);
         }
         return;
       }
-      if (/^[0-9]$/.test(e.key) && isChannel) {
+      const action = playerKeyAction(e.key, isChannel ? "live" : "vod", focus);
+      if (action?.type === "digit") {
         e.preventDefault();
         setEntry((x) => pushDigit(x, e.key, Date.now()));
         return;
@@ -272,40 +348,39 @@ export function Player({ route }: { route: PlayerRoute }) {
         commitNumber(entry);
         return;
       }
-      switch (e.key) {
-        case "ArrowUp":
-        case "PageUp":
-        case "ChannelUp":
-          if (!isChannel || (inControl && e.key === "ArrowUp")) return;
-          e.preventDefault();
-          void zapBy(-1);
+      switch (action?.type) {
+        case "native":
           return;
-        case "ArrowDown":
-        case "PageDown":
-        case "ChannelDown":
-          if (!isChannel || (inControl && e.key === "ArrowDown")) return;
+        case "zap":
           e.preventDefault();
-          void zapBy(1);
+          void zapBy(action.delta);
           return;
-        case "ArrowLeft":
-        case "ArrowRight": {
-          if (inControl) {
-            // move between control buttons
-            const btns = [...(rootRef.current?.querySelectorAll<HTMLElement>(".pctrls button, .ptop button") ?? [])];
-            const i = btns.indexOf(active as HTMLElement);
-            if (i >= 0) {
-              e.preventDefault();
-              btns[Math.max(0, Math.min(btns.length - 1, i + (e.key === "ArrowRight" ? 1 : -1)))]?.focus();
-            }
-            return;
-          }
-          const v = control.current?.video;
-          if (!isChannel && v) {
+        case "move-focus": {
+          // move between control buttons
+          const btns = [...(rootRef.current?.querySelectorAll<HTMLElement>(".pctrls button, .ptop button") ?? [])];
+          const i = btns.indexOf(active as HTMLElement);
+          if (i >= 0) {
             e.preventDefault();
-            v.currentTime = Math.max(0, v.currentTime + (e.key === "ArrowRight" ? 10 : -10));
+            btns[Math.max(0, Math.min(btns.length - 1, i + action.dir))]?.focus();
           }
           return;
         }
+        case "seek": {
+          e.preventDefault();
+          const v = control.current?.video;
+          if (v) seekTo(seekTarget(v.currentTime, action.delta, v.duration));
+          return;
+        }
+        case "toggle-pause": {
+          e.preventDefault();
+          if (focus === "none" && active instanceof HTMLElement && active !== rootRef.current) active.blur();
+          const v = control.current?.video;
+          if (v) void (v.paused ? v.play() : v.pause());
+          return;
+        }
+      }
+      if (/^Arrow/.test(e.key)) return;
+      switch (e.key) {
         case "Enter":
           if (inControl) return;
           e.preventDefault();
@@ -351,16 +426,11 @@ export function Player({ route }: { route: PlayerRoute }) {
         case "m":
           void setPrefs({ muted: !muted });
           return;
-        case " ":
-        case "k": {
-          if (inControl && e.key === " ") return;
-          e.preventDefault();
-          const v = control.current?.video;
-          if (v) void (v.paused ? v.play() : v.pause());
-          return;
-        }
         case "g":
           navigate({ name: "guide" });
+          return;
+        case "r":
+          if (isChannel) toggleReactor();
           return;
         case "l":
           navigate({ name: "live" });
@@ -460,7 +530,7 @@ export function Player({ route }: { route: PlayerRoute }) {
       tabIndex={-1}
       onMouseMove={poke}
       onDoubleClick={(e) => {
-        if ((e.target as HTMLElement).closest("button, .pctrls, .chpanel")) return;
+        if ((e.target as HTMLElement).closest("button, .pctrls, .chpanel, .reactor")) return;
         void toggleFullscreen();
       }}
       onContextMenu={(e) => {
@@ -497,13 +567,45 @@ export function Player({ route }: { route: PlayerRoute }) {
             onAutoplayBlocked={() => void setPrefs({ muted: true })}
             onTime={(cur, dur) => setTime({ cur, dur })}
             startFraction={route.resume}
+            live={isChannel}
+            latency={prefs?.latency}
+            delay={reactor ? reactors.overlay.delay : 0}
+            onHold={setHold}
+            onPlayState={(p) => {
+              setPaused(p);
+              if (!p) setEnded(false);
+              if (p && !isChannel) saveProgress.current();
+            }}
+            onEnded={() => {
+              setEnded(true);
+              if (!isChannel) saveProgress.current();
+            }}
           />
         ) : null}
         {state.status === "starting" ? <span className="stream-loading big" aria-label="Loading" /> : null}
       </div>
       <div className="pshade" />
 
+      {reactor ? <ReactorOverlay reactor={reactor} overlay={reactors.overlay} chrome={showChrome} onClose={() => pickReactor(null)} onFocusLeft={() => rootRef.current?.focus()} /> : null}
+      {hold !== null && reactor ? (
+        <div className="reactor-hold num" role="status">
+          Holding the match {hold} s
+        </div>
+      ) : null}
+
       {card ? <div className="pcard">{card}</div> : null}
+
+      {!card && nextUp && phase !== "hidden" ? (
+        <NextEpisodeCard
+          next={nextUp}
+          phase={phase}
+          onPlay={playNext}
+          onCancel={() => {
+            setNextCancelled(true);
+            poke();
+          }}
+        />
+      ) : null}
 
       {entry.digits ? (
         <div className="numentry num" aria-live="assertive">
@@ -556,7 +658,6 @@ export function Player({ route }: { route: PlayerRoute }) {
           <div className="psub">
             {isChannel && prog ? <span className="num">{timeRange(prog.start, prog.stop)}</span> : null}
             {isChannel && prog?.category ? <span>{prog.category}</span> : null}
-            {!isChannel && time.dur ? <span className="num">{duration(time.cur)} / {duration(time.dur)}</span> : null}
           </div>
         </div>
         {isChannel ? (
@@ -569,7 +670,7 @@ export function Player({ route }: { route: PlayerRoute }) {
               </div>
             </div>
           ) : null
-        ) : (
+        ) : card ? null : (
           <div className="scrub">
             <input
               type="range"
@@ -577,14 +678,26 @@ export function Player({ route }: { route: PlayerRoute }) {
               min={0}
               max={Math.max(1, time.dur)}
               step={1}
-              value={time.cur}
+              value={scrub ?? time.cur}
               aria-label="Seek"
+              aria-valuetext={`${duration(scrub ?? time.cur)} of ${duration(time.dur)}`}
               onChange={(e) => {
-                const v = control.current?.video;
-                if (v) v.currentTime = Number(e.target.value);
+                // Follow the drag on screen; seek once it settles.
+                const to = Number(e.target.value);
+                setScrub(to);
+                if (scrubTimer.current) window.clearTimeout(scrubTimer.current);
+                scrubTimer.current = window.setTimeout(() => {
+                  scrubTimer.current = null;
+                  seekTo(to);
+                  setScrub(null);
+                }, 180);
               }}
-              style={{ ["--p" as string]: `${progValue * 100}%` }}
+              style={{ ["--p" as string]: `${(time.dur ? (scrub ?? time.cur) / time.dur : 0) * 100}%` }}
             />
+            <div className="times num">
+              <span>{duration(scrub ?? time.cur)}</span>
+              <span>{time.dur ? duration(time.dur) : ""}</span>
+            </div>
           </div>
         )}
         <div className="pctrls">
@@ -621,6 +734,9 @@ export function Player({ route }: { route: PlayerRoute }) {
             </button>
             {isChannel ? (
               <>
+                <button type="button" className={menu === "reactor" || reactor ? "cb on" : "cb"} onClick={() => setMenu(menu === "reactor" ? null : "reactor")} aria-haspopup="menu" aria-expanded={menu === "reactor"}>
+                  <ReactorIcon /> Reactor
+                </button>
                 <button type="button" className="cb" onClick={() => navigate({ name: "multiview", channelId: target.id, ctx: ctx ?? undefined })}>
                   <Icon name="grid" /> Multiview
                 </button>
@@ -640,7 +756,17 @@ export function Player({ route }: { route: PlayerRoute }) {
             </button>
           </div>
         </div>
-        {menu ? (
+        {menu === "reactor" ? (
+          <ReactorMenu
+            active={reactor?.id ?? null}
+            canDelay={isChannel}
+            onClose={() => setMenu(null)}
+            onPick={(id) => {
+              pickReactor(id);
+              if (!id) setMenu(null);
+            }}
+          />
+        ) : menu ? (
           <TrackMenu
             tracks={tracks}
             only={menu}

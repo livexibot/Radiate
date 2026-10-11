@@ -212,6 +212,18 @@ pub struct VodItem {
     pub plot: Option<String>,
     /// Watched share (0..1), when started.
     pub progress: Option<f32>,
+    /// Set on an episode in continue watching: the series it belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series_id: Option<String>,
+    /// Set on an episode in continue watching (equal to `id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub season: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode_title: Option<String>,
 }
 
 /// A series with its seasons and episodes.
@@ -406,6 +418,34 @@ pub struct Prefs {
     pub onboarded: bool,
     pub favorites_order: Vec<String>,
     pub epg_refresh_hours: u32,
+    /// Live latency: how close to the live edge the player stays.
+    pub latency: Latency,
+    /// Which live format to ask an Xtream provider for.
+    pub live_format: LiveFormat,
+    /// Fields the core doesn't use itself; stored and returned as they are.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// `prefs.latency`: "low" | "normal" | "stable".
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Latency {
+    Low,
+    #[default]
+    Normal,
+    Stable,
+}
+
+/// `prefs.liveFormat`: "auto" | "ts" | "hls". Auto takes HLS when the
+/// provider offers it, else MPEG-TS.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LiveFormat {
+    #[default]
+    Auto,
+    Ts,
+    Hls,
 }
 
 impl Default for Prefs {
@@ -420,6 +460,9 @@ impl Default for Prefs {
             onboarded: false,
             favorites_order: Vec::new(),
             epg_refresh_hours: 12,
+            latency: Latency::Normal,
+            live_format: LiveFormat::Auto,
+            extra: serde_json::Map::new(),
         }
     }
 }
@@ -492,6 +535,22 @@ mod tests {
         assert_eq!(prefs.volume, 1.0);
         let v = serde_json::to_value(&prefs).unwrap();
         assert!(v.get("epgRefreshHours").is_some() && v.get("favoritesOrder").is_some());
+        assert_eq!(
+            (v["latency"].clone(), v["liveFormat"].clone()),
+            (json!("normal"), json!("auto"))
+        );
+        let prefs: Prefs = serde_json::from_value(
+            json!({"latency": "low", "liveFormat": "ts", "sportsGroups": {"include": ["a"]}}),
+        )
+        .unwrap();
+        assert_eq!(
+            (prefs.latency, prefs.live_format),
+            (Latency::Low, LiveFormat::Ts)
+        );
+        assert_eq!(prefs.extra["sportsGroups"], json!({"include": ["a"]}));
+        let v = serde_json::to_value(&prefs).unwrap();
+        assert_eq!(v["sportsGroups"], json!({"include": ["a"]}));
+        assert!(serde_json::from_value::<Prefs>(json!({"latency": "fast"})).is_err());
         let err = serde_json::to_value(crate::Error::Auth("No.".into())).unwrap();
         assert_eq!(err, json!({"code": "auth", "message": "No."}));
     }

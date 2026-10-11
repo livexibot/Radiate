@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Channel, Group } from "../api";
+import { api, type Channel, type Group } from "../api";
 import { ContextMenu, type MenuState } from "../components/ContextMenu";
 import { Empty } from "../components/Empty";
 import { Icon } from "../components/Icon";
@@ -7,11 +7,12 @@ import { Logo } from "../components/Logo";
 import { Progress } from "../components/Progress";
 import { Skeleton } from "../components/Skeleton";
 import { VirtualList } from "../components/VirtualList";
+import { shortSportsName, sportsFirst } from "../lib/sports";
 import { clock, progressOf, timeRange } from "../lib/time";
 import { StreamView } from "../player/StreamView";
 import { useApp, type Route } from "../state/app";
 import { useChannelActions } from "../state/channelActions";
-import { useDebounced, useGroups, useNow, useNowNext, usePagedChannels } from "../state/hooks";
+import { useDebounced, useGroups, useLoad, useNow, useNowNext, usePagedChannels, useSportsOverrides } from "../state/hooks";
 
 const ROW = 64;
 
@@ -20,12 +21,28 @@ export function groupLabel(g: Group, all: Group[], sourceName: (id: string) => s
 }
 
 export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
-  const { navigate, sources, sourceName } = useApp();
+  const { navigate, sources, sourceName, version } = useApp();
   const groups = useGroups("live");
-  const [sel, setSel] = useState<{ groupId: string | null; favorites: boolean }>({ groupId: route.groupId ?? null, favorites: route.favorites ?? false });
+  const overrides = useSportsOverrides();
+  const explicit = route.groupId !== undefined || route.favorites !== undefined;
+  const [picked, setSel] = useState<{ groupId: string | null; favorites: boolean } | null>(explicit ? { groupId: route.groupId ?? null, favorites: route.favorites ?? false } : null);
   const [filter, setFilter] = useState("");
   const search = useDebounced(filter.trim(), 200);
-  const list = usePagedChannels({ groupId: sel.groupId, favoritesOnly: sel.favorites, search });
+  const { sports: sportsGroups, rest: otherGroups } = useMemo(() => sportsFirst(groups ?? [], overrides), [groups, overrides]);
+
+  // with nothing chosen, open on Favorites if there are any, else the first sports group
+  const { data: hasFavorites } = useLoad(
+    () => (picked ? Promise.resolve(false) : api.channelsList({ favoritesOnly: true, includeHidden: false, offset: 0, limit: 1 }).then((p) => p.total > 0, () => false)),
+    [version, picked === null],
+  );
+  const auto = useMemo(() => {
+    if (picked || hasFavorites === null || !groups) return null;
+    if (hasFavorites) return { groupId: null, favorites: true };
+    return { groupId: sportsGroups[0]?.id ?? null, favorites: false };
+  }, [picked, hasFavorites, groups, sportsGroups]);
+  const sel = picked ?? auto ?? { groupId: null, favorites: false };
+  const deciding = !picked && !auto;
+  const list = usePagedChannels({ groupId: sel.groupId, favoritesOnly: sel.favorites, search, paused: deciding });
   const [focused, setFocused] = useState(0);
   const [range, setRange] = useState<[number, number]>([0, 0]);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -34,6 +51,7 @@ export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => setFocused(0), [sel.groupId, sel.favorites, search]);
+
 
   const ensure = list.ensure;
   const onRange = useCallback(
@@ -64,9 +82,30 @@ export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
   const multiSource = (sources?.length ?? 0) > 1;
   const bySource = useMemo(() => {
     const m = new Map<string, Group[]>();
-    for (const g of groups ?? []) m.set(g.sourceId, [...(m.get(g.sourceId) ?? []), g]);
+    for (const g of otherGroups) m.set(g.sourceId, [...(m.get(g.sourceId) ?? []), g]);
     return [...m.entries()];
-  }, [groups]);
+  }, [otherGroups]);
+  // sports groups with the same name in several sources sit together, each with its source
+  const sportsList = useMemo(() => {
+    const names = [...new Set(sportsGroups.map((g) => g.name))];
+    return names.flatMap((n) => {
+      const same = sportsGroups.filter((g) => g.name === n);
+      return same.map((g) => ({ g, twin: same.length > 1 }));
+    });
+  }, [sportsGroups]);
+  const groupButton = (g: Group, label: string, sub?: string) => (
+    <button type="button" key={g.id} className={sel.groupId === g.id ? "group on" : "group"} onClick={() => pickGroup(g.id, false)}>
+      {sub ? (
+        <span className="group-two">
+          <span className="ellipsis">{label}</span>
+          <span className="ellipsis group-src">{sub}</span>
+        </span>
+      ) : (
+        <span className="ellipsis">{label}</span>
+      )}
+      <span className="group-count num">{g.itemCount}</span>
+    </button>
+  );
 
   const pickGroup = (groupId: string | null, favorites: boolean) => {
     setSel({ groupId, favorites });
@@ -84,30 +123,34 @@ export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
       </header>
       <div className="live-grid">
         <nav className="groups" aria-label="Groups">
-          <button type="button" className={sel.favorites ? "group on" : "group"} onClick={() => pickGroup(null, true)}>
+          <button type="button" className={!deciding && sel.favorites ? "group on" : "group"} onClick={() => pickGroup(null, true)}>
             <span>Favorites</span>
             <Icon name="star" />
           </button>
-          <button type="button" className={!sel.favorites && !sel.groupId ? "group on" : "group"} onClick={() => pickGroup(null, false)}>
-            <span>All channels</span>
-          </button>
+          {sportsGroups.length > 0 ? (
+            <div className="group-sec">
+              <span className="group-head sports">Sports</span>
+              {sportsList.map(({ g, twin }) => groupButton(g, shortSportsName(g.name), twin ? sourceName(g.sourceId) : undefined))}
+            </div>
+          ) : null}
+          <div className="group-sec">
+            {sportsGroups.length > 0 ? <span className="group-head">Channels</span> : null}
+            <button type="button" className={!deciding && !sel.favorites && !sel.groupId ? "group on" : "group"} onClick={() => pickGroup(null, false)}>
+              <span>All channels</span>
+            </button>
+          </div>
           {!groups
             ? Array.from({ length: 7 }, (_, i) => <Skeleton key={i} h="2.4rem" r={10} className="group-skel" />)
             : bySource.map(([sid, gs]) => (
                 <div key={sid} className="group-sec">
                   {multiSource ? <span className="group-head">{sourceName(sid)}</span> : null}
-                  {gs.map((g) => (
-                    <button type="button" key={g.id} className={sel.groupId === g.id ? "group on" : "group"} onClick={() => pickGroup(g.id, false)}>
-                      <span className="ellipsis">{g.name}</span>
-                      <span className="group-count num">{g.itemCount}</span>
-                    </button>
-                  ))}
+                  {gs.map((g) => groupButton(g, g.name))}
                 </div>
               ))}
         </nav>
 
         <div className="chlist" ref={listRef}>
-          {list.total === null ? (
+          {list.total === null || deciding ? (
             <div className="chlist-skel">
               {Array.from({ length: 9 }, (_, i) => (
                 <div className="chrow" key={i}>

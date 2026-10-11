@@ -342,3 +342,34 @@
 .ob-steps li.on .ob-step-dot { box-shadow: inset 0 0 0 2px var(--acc); color: var(--acc); }
 .ob-steps li.done .ob-step-dot { background: var(--acc); color: var(--acc-ink); box-shadow: none; }
 .ob-step-dot .icon { width: 1rem; height: 1rem; stroke-width: 2.6; }
+
+/* ===== Live first ===== */
+.row-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.75rem; }
+.row-head .row-title { margin-bottom: 0; }
+.row-head .btn { height: 1.9rem; padding: 0 0.55rem 0 0.75rem; gap: 0.25rem; }
+.card-live { position: absolute; left: 0.6rem; bottom: 0.75rem; display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.45rem; border-radius: 0.4rem; background: var(--shade); color: #fff; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.card-live::before { content: ""; width: 0.42rem; height: 0.42rem; border-radius: 50%; background: var(--live); }
+.card-kick { position: absolute; left: 0.75rem; right: 0.75rem; bottom: 0.7rem; display: grid; gap: 0.05rem; }
+.card-kick b { font-size: 1.6rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1; text-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); }
+.card-kick span { font-size: 0.75rem; font-weight: 700; color: rgba(255, 255, 255, 0.78); }
+.card.event .card-thumb::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0, 0, 0, 0) 35%, rgba(0, 0, 0, 0.35)); pointer-events: none; }
+
+.library > .topbar { justify-content: flex-start; gap: 1.6rem; }
+.library-grid > .screen { height: auto; overflow: visible; padding: 0; }
+.library-grid > .screen > .topbar { margin-bottom: 1rem; }
+.library-grid > .screen > .topbar h1 { font-size: 1.05rem; font-weight: 700; letter-spacing: 0; }
+
+.group-head.sports { display: flex; align-items: center; gap: 0.4rem; }
+.group-head .icon { width: 0.95rem; height: 0.95rem; }
+.group-sec.first { margin-top: 0.2rem; }
+
+.seg { display: inline-flex; padding: 0.2rem; border-radius: 0.7rem; background: var(--s2); gap: 0.15rem; }
+.seg button { border: 0; background: transparent; color: var(--mute); font-weight: 700; font-size: 0.85rem; padding: 0.4rem 0.85rem; border-radius: 0.55rem; transition: background var(--t-fast), color var(--t-fast); }
+.seg button:hover { color: var(--fg); }
+.seg button.on { background: var(--s4); color: var(--fg); }
+.sport-tag { border: 0; padding: 0.25rem 0.6rem; border-radius: 999px; background: transparent; box-shadow: inset 0 0 0 1px var(--s3); color: var(--mute); font-size: 0.75rem; font-weight: 700; display: inline-flex; align-items: center; gap: 0.3rem; flex: none; }
+.sport-tag .icon { width: 0.9rem; height: 0.9rem; }
+.sport-tag:hover { color: var(--fg); }
+.sport-tag.on { background: rgba(245, 165, 36, 0.16); box-shadow: none; color: var(--acc); }
+.group-two { display: grid; min-width: 0; gap: 0.05rem; }
+.group-src { font-size: 0.72rem; color: var(--mute); font-weight: 600; }

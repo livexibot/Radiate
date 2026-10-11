@@ -12,14 +12,17 @@ interface Props {
 /** Audio and subtitle picker, anchored above the controls. */
 export function TrackMenu({ tracks, onAudio, onSubtitle, onClose, only }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  // Focus once when the menu opens; the player re-renders every second and must not move focus.
   useEffect(() => {
     ref.current?.querySelector<HTMLElement>(".opt.sel, .opt")?.focus();
     const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
+      if (!ref.current?.contains(e.target as Node)) close.current();
     };
     window.addEventListener("mousedown", onDown, true);
     return () => window.removeEventListener("mousedown", onDown, true);
-  }, [onClose]);
+  }, []);
   const onKey = (e: React.KeyboardEvent) => {
     const opts = [...(ref.current?.querySelectorAll<HTMLElement>(".opt") ?? [])];
     const i = opts.indexOf(document.activeElement as HTMLElement);

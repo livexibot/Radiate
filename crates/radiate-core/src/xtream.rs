@@ -469,7 +469,9 @@ fn parse_episode(v: &Value, season_hint: Option<u32>) -> Option<SeriesEpisode> {
     let episode = uint(obj.get("episode_num")).unwrap_or(0);
     let season = uint(obj.get("season")).or(season_hint).unwrap_or(1);
     Some(SeriesEpisode {
-        title: text(obj.get("title")).unwrap_or_else(|| format!("Episode {episode}")),
+        title: text(obj.get("title"))
+            .map(|t| episode_title(&t, episode))
+            .unwrap_or_else(|| format!("Episode {episode}")),
         plot: text(info.get("plot")),
         still: text(info.get("movie_image")).or_else(|| text(info.get("cover_big"))),
         duration_secs: uint(info.get("duration_secs"))
@@ -484,6 +486,39 @@ fn parse_episode(v: &Value, season_hint: Option<u32>) -> Option<SeriesEpisode> {
         season,
         episode,
     })
+}
+
+/// Providers often name episodes "Show - S01E02 - Title": keep the title.
+/// A name that is only the show and the marker becomes "Episode N".
+pub fn episode_title(raw: &str, episode: u32) -> String {
+    let b = raw.as_bytes();
+    let digits = |mut i: usize| {
+        let start = i;
+        while i < b.len() && b[i].is_ascii_digit() {
+            i += 1;
+        }
+        (i > start).then_some(i)
+    };
+    for i in 0..b.len() {
+        if !b[i].eq_ignore_ascii_case(&b'S') || (i > 0 && b[i - 1].is_ascii_alphanumeric()) {
+            continue;
+        }
+        let Some(j) = digits(i + 1) else { continue };
+        if j >= b.len() || !b[j].eq_ignore_ascii_case(&b'E') {
+            continue;
+        }
+        let Some(k) = digits(j + 1) else { continue };
+        if k < b.len() && b[k].is_ascii_alphanumeric() {
+            continue;
+        }
+        let rest = raw[k..].trim_matches(|c: char| c.is_whitespace() || "-|:.·_".contains(c));
+        return if rest.is_empty() {
+            format!("Episode {episode}")
+        } else {
+            rest.to_string()
+        };
+    }
+    raw.trim().to_string()
 }
 
 /// `HH:MM:SS` or `MM:SS` into seconds.
@@ -683,5 +718,14 @@ mod tests {
         );
         assert_eq!(year_in(Some("Film (1999) 4K")), Some(1999));
         assert_eq!(year_in(Some("12345")), None);
+    }
+
+    #[test]
+    fn episode_titles_lose_the_show_and_marker() {
+        assert_eq!(episode_title("Harbor Tales - S01E02 - Storm", 2), "Storm");
+        assert_eq!(episode_title("Harbor Tales S2E10: The End", 10), "The End");
+        assert_eq!(episode_title("Harbor Tales - S01E03", 3), "Episode 3");
+        assert_eq!(episode_title("Back", 1), "Back");
+        assert_eq!(episode_title("Sse1 Disco S01", 1), "Sse1 Disco S01");
     }
 }

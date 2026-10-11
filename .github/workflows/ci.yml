@@ -87,11 +87,12 @@ jobs:
       - name: Install web dependencies
         run: npm ci
         working-directory: apps/desktop
+      # Pull requests have no signing key, so skip the signed update files.
       - uses: tauri-apps/tauri-action@v0
         id: tauri
         with:
           projectPath: apps/desktop
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
       - uses: actions/upload-artifact@v4
         with:
           name: radiate-${{ matrix.platform }}

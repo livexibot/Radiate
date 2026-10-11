@@ -4,12 +4,13 @@ import { Icon } from "../components/Icon";
 import { Logo } from "../components/Logo";
 import { Modal } from "../components/Modal";
 import { monogram, tone } from "../lib/monogram";
-import { capacityFor, moveFocus, planSlots, TILE_COUNT, type Layout } from "../lib/multiview";
+import { capacityFor, moveFocus, planSlots, rankSuggestions, TILE_COUNT, type Layout } from "../lib/multiview";
+import { isSportsGroup } from "../lib/sports";
 import { FailCard, LimitCard, limitLine } from "../player/Cards";
 import { useStream, type StreamState } from "../player/useStream";
 import { VideoSurface } from "../player/VideoSurface";
 import { useApp, type Route } from "../state/app";
-import { useNow } from "../state/hooks";
+import { useNow, useSportsOverrides } from "../state/hooks";
 
 type MvRoute = Extract<Route, { name: "multiview" }>;
 type TileStatus = StreamState["status"];
@@ -28,24 +29,28 @@ export function Multiview({ route }: { route: MvRoute }) {
   const warnedUnknown = useRef(false);
   const now = useNow(30_000);
 
-  // seed tile + suggestions from the same group (then the same group name in other sources)
+  // seed tile + suggestions: the same group, the same group name in other sources, then other sports groups
+  const overrides = useSportsOverrides();
   useEffect(() => {
     let alive = true;
     void (async () => {
       const seed = await api.channelGet(route.channelId);
       if (!alive) return;
       setTiles((t) => [seed, ...t.slice(1)]);
-      const same = await api.channelsList({ groupId: seed.groupId, favoritesOnly: false, includeHidden: false, offset: 0, limit: 40 });
+      const page = (groupId: string, limit: number) => api.channelsList({ groupId, favoritesOnly: false, includeHidden: false, offset: 0, limit }).then((p) => p.items, () => [] as Channel[]);
       const groups = await api.groupsList("live", false);
       const twins = groups.filter((g) => g.name === seed.groupName && g.id !== seed.groupId);
-      const others = (await Promise.all(twins.map((g) => api.channelsList({ groupId: g.id, favoritesOnly: false, includeHidden: false, offset: 0, limit: 20 })))).flatMap((p) => p.items);
+      const sports = groups.filter((g) => g.id !== seed.groupId && g.name !== seed.groupName && isSportsGroup(g, overrides)).slice(0, 8);
+      const lists = await Promise.all([page(seed.groupId, 40), ...twins.map((g) => page(g.id, 20)), ...sports.map((g) => page(g.id, 15))]);
+      const all = lists.flat();
+      const nn = all.length ? await api.epgNowNext(all.map((c) => c.id), Date.now()).catch(() => ({})) : {};
       if (!alive) return;
-      setCandidates([...same.items, ...others].filter((c) => c.id !== seed.id));
+      setCandidates(rankSuggestions(seed, all, nn, Date.now(), overrides));
     })().catch(() => toast("Couldn't load channels for multiview.", "bad"));
     return () => {
       alive = false;
     };
-  }, [route.channelId, toast]);
+  }, [route.channelId, toast, overrides]);
 
   // once the first tile has its stream, fill the rest within each provider's limit
   const onStatus = useCallback((i: number, s: TileStatus) => {

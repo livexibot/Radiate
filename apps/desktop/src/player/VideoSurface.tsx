@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type Hls from "hls.js";
-import type { PlayStarted } from "../api";
+import type { LatencyPref, PlayStarted } from "../api";
+import { MatchDelay } from "../reactor/delay";
+import { hlsConfig, holdConfig, mpegtsConfig, startBufferSecs } from "./latency";
+import { resumePosition, STALL_SECS, stallStep } from "./vodLogic";
 
 export interface TrackInfo {
   id: number;
@@ -52,9 +55,17 @@ interface Props {
   onTime?: (current: number, duration: number) => void;
   /** resume point as a share of the duration (0..1), for VOD */
   startFraction?: number;
+  /** false for movies and episodes; live is the default */
+  live?: boolean;
+  /** live latency preference; read when a stream starts */
+  latency?: LatencyPref;
+  onPlayState?: (paused: boolean) => void;
+  onEnded?: () => void;
+  /** Live only: seconds the picture is held back to line up with a reactor. */
+  delay?: number;
+  /** Seconds left while the picture is held back, then null. */
+  onHold?: (secondsLeft: number | null) => void;
 }
-
-const STALL_SECS = 15;
 const UNSUPPORTED: FatalInfo = { message: "The built-in player can't play this format.", decode: true };
 
 type MpegtsPlayer = {
@@ -66,12 +77,23 @@ type MpegtsPlayer = {
   on(event: string, cb: (...args: unknown[]) => void): void;
 };
 
-export function VideoSurface({ stream, volume, muted, className, onTracks, onStats, onFatal, onAutoplayBlocked, controlRef, onTime, startFraction }: Props) {
+export function VideoSurface({ stream, volume, muted, className, onTracks, onStats, onFatal, onAutoplayBlocked, controlRef, onTime, startFraction, live = true, latency = "normal", onPlayState, onEnded, delay = 0, onHold }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const cb = useRef({ onTracks, onStats, onFatal, onAutoplayBlocked, onTime });
-  cb.current = { onTracks, onStats, onFatal, onAutoplayBlocked, onTime };
+  const cb = useRef({ onTracks, onStats, onFatal, onAutoplayBlocked, onTime, onPlayState, onEnded, onHold });
+  cb.current = { onTracks, onStats, onFatal, onAutoplayBlocked, onTime, onPlayState, onEnded, onHold };
   const startRef = useRef(startFraction);
+  startRef.current = startFraction;
+  const liveRef = useRef(live);
+  liveRef.current = live;
+  const latencyRef = useRef(latency);
+  latencyRef.current = latency;
   const [hasFrame, setHasFrame] = useState(false);
+  // Holding back changes how the players catch up, so they are set up again when it turns on or off.
+  const holding = live && delay > 0;
+  const delayRef = useRef(delay);
+  delayRef.current = live ? delay : 0;
+  // The running stream's delay, once its first picture is up.
+  const matchDelay = useRef<{ d: MatchDelay; started: boolean } | null>(null);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -93,9 +115,14 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
     let fps: number | null = null;
     let levelBitrate: number | null = null;
     let waiting = false;
+    const isLive = liveRef.current;
+    let startAt = startRef.current;
     const fatal = (f: FatalInfo) => {
       if (!disposed) cb.current.onFatal?.(f);
     };
+    const holdBack = isLive ? { d: new MatchDelay(video, (left) => !disposed && cb.current.onHold?.(left)), started: false } : null;
+    matchDelay.current = holdBack;
+    const hold = isLive && delayRef.current > 0;
 
     const tryPlay = () => {
       video.play().catch((e: unknown) => {
@@ -173,14 +200,23 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
     const onPlaying = () => {
       waiting = false;
       setHasFrame(true);
-    };
-    const onLoaded = () => {
-      const f = startRef.current;
-      if (f && f > 0 && f < 0.97 && Number.isFinite(video.duration) && video.duration > 0) {
-        video.currentTime = f * video.duration;
-        startRef.current = undefined;
+      // The first picture is the live edge: build the delay from here.
+      if (holdBack && !holdBack.started) {
+        holdBack.started = true;
+        holdBack.d.set(delayRef.current);
       }
     };
+    const onLoaded = () => {
+      const at = isLive ? null : resumePosition(startAt, video.duration);
+      startAt = undefined;
+      if (at !== null) video.currentTime = at;
+    };
+    const onPlay = () => cb.current.onPlayState?.(false);
+    const onPause = () => cb.current.onPlayState?.(true);
+    const onEndedEv = () => cb.current.onEnded?.();
+    video.addEventListener("play", onPlay);
+    video.addEventListener("pause", onPause);
+    video.addEventListener("ended", onEndedEv);
     video.addEventListener("error", onError);
     video.addEventListener("waiting", onWaiting);
     video.addEventListener("playing", onPlaying);
@@ -203,7 +239,8 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
           } else fatal(UNSUPPORTED);
           return;
         }
-        const h = new HlsCtor({ enableWorker: true, lowLatencyMode: false, backBufferLength: 30, maxBufferLength: 20 });
+        const cfg = hlsConfig(latencyRef.current, isLive);
+        const h = new HlsCtor(hold ? holdConfig(cfg, "hls") : cfg);
         hls = h;
         h.on(HlsCtor.Events.MANIFEST_PARSED, () => {
           tryPlay();
@@ -245,14 +282,13 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
         const mod = await import("mpegts.js");
         if (disposed) return;
         const mpegts = mod.default;
-        if (!mpegts.getFeatureList().mseLivePlayback) {
+        const features = mpegts.getFeatureList();
+        if (!(isLive ? features.mseLivePlayback : features.msePlayback)) {
           fatal(UNSUPPORTED);
           return;
         }
-        const p = mpegts.createPlayer(
-          { type: "mpegts", isLive: true, url: stream.url },
-          { enableWorker: true, liveBufferLatencyChasing: true, lazyLoad: false },
-        ) as unknown as MpegtsPlayer;
+        const cfg = mpegtsConfig(latencyRef.current, isLive);
+        const p = mpegts.createPlayer({ type: "mpegts", isLive, url: stream.url }, hold ? holdConfig(cfg, "mpegts") : cfg) as unknown as MpegtsPlayer;
         ts = p;
         p.on(mpegts.Events.MEDIA_INFO, (...args: unknown[]) => {
           const info = args[0] as { videoCodec?: string; fps?: number } | undefined;
@@ -266,7 +302,19 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
         });
         p.attachMediaElement(video);
         p.load();
-        tryPlay();
+        const gather = isLive ? startBufferSecs(latencyRef.current) : 0;
+        if (gather <= 0) tryPlay();
+        else {
+          const since = Date.now();
+          const wait = window.setInterval(() => {
+            const n = video.buffered.length;
+            const have = n ? video.buffered.end(n - 1) - video.buffered.start(0) : 0;
+            if (disposed || have >= gather || Date.now() - since > (gather + 5) * 1000) {
+              window.clearInterval(wait);
+              if (!disposed) tryPlay();
+            }
+          }, 200);
+        }
         return;
       }
       // mp4 and unknown: let the browser try
@@ -277,18 +325,21 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
 
     // A picture that stops moving while it should be playing (the provider
     // stopped sending, or a live stream ended) becomes a plain failure card
-    // instead of a frozen frame.
+    // instead of a frozen frame. A paused or seeking movie is never stuck.
     let lastTime = -1;
     let stuckSecs = 0;
     let stallReported = false;
     const statsTimer = window.setInterval(() => {
       if (disposed) return;
       const stopped = { message: "The stream stopped. The provider may be having trouble.", decode: false };
-      // MPEG-TS here is always live, so reaching its end is a failure too.
-      const shouldMove = !video.paused && !video.ended && (stream.kind === "hls" || stream.kind === "mpegts");
-      if (stream.kind === "mpegts" && video.ended) stuckSecs = STALL_SECS;
-      else if (shouldMove && video.currentTime === lastTime) stuckSecs += 1;
-      else stuckSecs = 0;
+      stuckSecs = stallStep(stuckSecs, lastTime, {
+        currentTime: video.currentTime,
+        paused: video.paused,
+        ended: video.ended,
+        seeking: video.seeking,
+        live: isLive,
+        kind: stream.kind,
+      });
       lastTime = video.currentTime;
       if (stuckSecs >= STALL_SECS && !stallReported) {
         stallReported = true;
@@ -316,6 +367,14 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
     return () => {
       disposed = true;
       window.clearInterval(statsTimer);
+      if (holdBack) {
+        holdBack.d.dispose();
+        if (matchDelay.current === holdBack) matchDelay.current = null;
+        cb.current.onHold?.(null);
+      }
+      video.removeEventListener("play", onPlay);
+      video.removeEventListener("pause", onPause);
+      video.removeEventListener("ended", onEndedEv);
       video.removeEventListener("error", onError);
       video.removeEventListener("waiting", onWaiting);
       video.removeEventListener("playing", onPlaying);
@@ -336,7 +395,13 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
       video.load();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stream.sessionId, stream.url, stream.kind]);
+  }, [stream.sessionId, stream.url, stream.kind, holding]);
+
+  // A new delay while playing: hold for the difference, or skip forward through the buffer.
+  useEffect(() => {
+    const m = matchDelay.current;
+    if (m?.started) m.d.set(live ? delay : 0);
+  }, [delay, live]);
 
   return <video ref={videoRef} className={`video${hasFrame ? " has-frame" : ""}${className ? ` ${className}` : ""}`} playsInline preload="auto" />;
 }

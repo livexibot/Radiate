@@ -7,14 +7,14 @@ import { Icon } from "../components/Icon";
 import { Logo } from "../components/Logo";
 import { Skeleton } from "../components/Skeleton";
 import { chunksFor, floorTo, layoutRow, mergeProgrammes, programmeAt, revealX, rulerTicks, timeAt, totalWidth, xAt, type GuideScale } from "../lib/guideLayout";
+import { shortSportsName, sportsFirst } from "../lib/sports";
 import { clock, dayLabel, DAY, HOUR, MINUTE, timeRange } from "../lib/time";
 import { clampIndex, computeWindow } from "../lib/virtual";
 import { StreamView } from "../player/StreamView";
 import { useApp } from "../state/app";
 import { useChannelActions } from "../state/channelActions";
-import { useDebounced, useGroups, useNow, usePagedChannels } from "../state/hooks";
+import { mergeGroupsByName, useDebounced, useGroups, useLoad, useNow, usePagedChannels, useSportsOverrides } from "../state/hooks";
 import { EpgMatchPicker } from "./EpgMatchPicker";
-import { groupLabel } from "./Live";
 
 const CHUNK = 6 * HOUR;
 
@@ -34,11 +34,30 @@ interface Selection {
   start: number | null;
 }
 
-export function Guide() {
-  const { navigate, sourceName, version } = useApp();
+export function Guide({ initialChip }: { initialChip?: string }) {
+  const { navigate, version } = useApp();
   const groups = useGroups("live");
-  const [chip, setChip] = useState("all");
-  const filter = useMemo(() => ({ groupId: chip === "all" || chip === "fav" ? null : chip, favoritesOnly: chip === "fav" }), [chip]);
+  const overrides = useSportsOverrides();
+  const { sports: sportsGroups, rest: otherGroups } = useMemo(() => sportsFirst(groups ?? [], overrides), [groups, overrides]);
+  const [picked, setChip] = useState<string | null>(initialChip ?? null);
+  // with nothing chosen, open on Favorites if there are any, else Sports
+  const { data: hasFavorites } = useLoad(
+    () => (picked ? Promise.resolve(false) : api.channelsList({ favoritesOnly: true, includeHidden: false, offset: 0, limit: 1 }).then((p) => p.total > 0, () => false)),
+    [version, picked === null],
+  );
+  const auto = picked || hasFavorites === null || !groups ? null : hasFavorites ? "fav" : sportsGroups.length ? "sports" : "all";
+  const chip = picked ?? auto ?? "all";
+  const sportsIds = useMemo(() => sportsGroups.map((g) => g.id), [sportsGroups]);
+  const deciding = (!picked && !auto) || (chip === "sports" && !groups);
+  const filter = useMemo(
+    () => ({
+      groupId: null,
+      favoritesOnly: chip === "fav",
+      groupIds: chip === "sports" ? sportsIds : chip.startsWith("g:") ? chip.slice(2).split("\n") : null,
+      paused: deciding,
+    }),
+    [chip, sportsIds, deciding],
+  );
   const list = usePagedChannels(filter);
   const now = useNow(30_000);
   const rem = useRem();
@@ -173,7 +192,7 @@ export function Guide() {
     [ROW, RULER, CHW, scale],
   );
 
-  const play = (c: Channel) => navigate({ name: "player", target: { type: "channel", id: c.id }, ctx: { groupId: filter.groupId, favoritesOnly: filter.favoritesOnly } });
+  const play = (c: Channel) => navigate({ name: "player", target: { type: "channel", id: c.id }, ctx: { groupId: filter.groupIds ? c.groupId : null, favoritesOnly: filter.favoritesOnly } });
 
   /** Time used to pick a programme when moving up/down: now for a live programme, else its start (kept on screen). */
   const anchorFor = (p: Programme) => {
@@ -261,8 +280,15 @@ export function Guide() {
   };
 
   const chips = useMemo(
-    () => [{ id: "fav", label: "Favorites" }, { id: "all", label: "All" }, ...(groups ?? []).map((g) => ({ id: g.id, label: groupLabel(g, groups ?? [], sourceName) }))],
-    [groups, sourceName],
+    () => [
+      ...(sportsGroups.length ? [{ id: "sports", label: "Sports" }] : []),
+      { id: "fav", label: "Favorites" },
+      { id: "all", label: "All" },
+      // one chip per group name, covering that group in every source
+      ...mergeGroupsByName(sportsGroups).map((m) => ({ id: `g:${m.ids.join("\n")}`, label: shortSportsName(m.name) })),
+      ...mergeGroupsByName(otherGroups).map((m) => ({ id: `g:${m.ids.join("\n")}`, label: m.name })),
+    ],
+    [sportsGroups, otherGroups],
   );
 
   const xNow = xAt(scale, now);
@@ -394,7 +420,7 @@ export function Guide() {
         </div>
       </div>
       <div className="guide-bar">
-        <Chips items={chips} value={chip} onChange={setChip} label="Groups" />
+        <Chips items={chips} value={deciding ? "" : chip} onChange={setChip} label="Groups" />
       </div>
       {list.total === 0 ? (
         <Empty icon={chip === "fav" ? "star" : "guide"} title={chip === "fav" ? "No favorites yet" : "No channels in this group"} />

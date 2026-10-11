@@ -9,10 +9,19 @@ Radiate for watching.
 
 ![Radiate's TV guide: a live preview above a real grid, with the now-line](docs/images/guide.png)
 
-**[Download Radiate](https://github.com/livexibot/Radiate/releases/latest)**
+**[Download Radiate](https://github.com/livexibot/Radiate/releases/latest)**:
+an installer for Windows (`.exe` or `.msi`), a `.dmg` for macOS, and an
+AppImage, `.deb` or `.rpm` for Linux. Radiate updates itself after that.
 
 ## What it does
 
+- **Live sports first.** Home opens on the matches on now and the ones
+  starting soon, from your favorites and every sports group. Live and the
+  guide have a Sports view, and you choose which groups count as sports.
+- **Watch with a reactor.** Save YouTube reactors by link, then show one
+  in a box beside the match, on the left or right, in three sizes, with
+  its own volume. If the reactor is behind your feed, hold the match back
+  a few seconds to line them up. It's YouTube's own player.
 - **Your sources.** M3U and M3U8 playlists by link or file, Xtream Codes
   logins (live TV, movies and series), and XMLTV guides, gzipped or not.
   Or try it with free public channels by country.
@@ -24,22 +33,24 @@ Radiate for watching.
   network. Radiate opens on the channel you watched last.
 - **Zapping like a TV.** Up and down to change channel, type a number,
   Back twice for the previous channel, Enter for the channel list.
-- **Movies and series** from Xtream sources, grouped into seasons, with
-  progress and resume.
+- **Movies and series** from Xtream sources in one Library, grouped into
+  seasons, with progress, resume and Continue watching.
 - **Multiview.** Up to four channels at once, one big and three small or a
   2×2 grid, with sound following the highlighted tile. It never opens more
   streams than your provider allows.
 - **Honest errors.** When a stream fails, Radiate says why in plain words
   (offline at the provider, account refused, server trouble) and offers to
   try again.
+- **Keeps itself up to date.** Radiate checks for a new version in the
+  background, verifies its signature, and installs it when you say so.
 - **Yours.** No ads, no telemetry, no account. Passwords stay in your
   system's keychain. Export and import every setting as one file.
 
 | Home | Player |
 | --- | --- |
 | ![Home](docs/images/home.png) | ![The player](docs/images/player.png) |
-| **Multiview** | **Series** |
-| ![Multiview](docs/images/multiview.png) | ![A series](docs/images/series.png) |
+| **Multiview** | **Library** |
+| ![Multiview](docs/images/multiview.png) | ![The library](docs/images/library.png) |
 
 ## How it works
 
@@ -49,6 +60,9 @@ page inside the app's window. Streams go through a small relay inside
 Radiate, on your computer only, which is also where your provider's
 connection limit is kept. Formats the built-in player can't handle open in
 [mpv](https://mpv.io) when it's installed.
+
+Reactors are YouTube's official embedded player, loaded only when you add
+or show one. Radiate never downloads or records YouTube's video.
 
 Radiate ships no channels and doesn't point to any. It plays what you
 already have the right to watch.

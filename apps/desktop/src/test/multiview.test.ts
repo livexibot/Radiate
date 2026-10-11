@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ConnectionUsage } from "../api/types";
-import { capacityFor, moveFocus, openableTiles, planSlots } from "../lib/multiview";
+import type { Channel, ConnectionUsage } from "../api/types";
+import { capacityFor, moveFocus, openableTiles, planSlots, rankSuggestions } from "../lib/multiview";
 
 const usage: ConnectionUsage[] = [
   { sourceId: "home", inUse: 1, limit: 2 },
@@ -62,5 +62,21 @@ describe("moveFocus", () => {
     expect(moveFocus("2x2", 1, "ArrowDown")).toBe(3);
     expect(moveFocus("2x2", 3, "ArrowLeft")).toBe(2);
     expect(moveFocus("2x2", 2, "ArrowUp")).toBe(0);
+  });
+});
+
+describe("rankSuggestions", () => {
+  const AT = 1_000_000;
+  const ch = (id: string, groupId: string, groupName: string): Channel => ({ id, sourceId: "s", number: 1, name: id, logo: null, groupId, groupName, tvgId: null, epgChannelId: null, favorite: false, hidden: false, catchupDays: null });
+  const live = (title: string, category: string | null = "Sports") => ({ now: { channelId: "", start: AT - 10, stop: AT + 10, title, description: null, category }, next: null });
+  const seed = ch("seed", "g1", "Sports | Football");
+  it("keeps the seed's group first, then twins, then other sports, then the rest", () => {
+    const list = [ch("news", "n", "News"), ch("us", "g3", "Sports | US"), ch("twin", "g2", "Sports | Football"), ch("same", "g1", "Sports | Football"), seed];
+    expect(rankSuggestions(seed, list, {}, AT).map((c) => c.id)).toEqual(["same", "twin", "us", "news"]);
+  });
+  it("puts live events before studio shows and empty channels within a group", () => {
+    const list = [ch("a", "g1", "x"), ch("b", "g1", "x"), ch("c", "g1", "x"), ch("a", "g1", "x")];
+    const nn = { b: live("Harbor FC v Kestrel"), c: live("Goals Tonight") };
+    expect(rankSuggestions(seed, list, nn, AT).map((c) => c.id)).toEqual(["b", "c", "a"]);
   });
 });

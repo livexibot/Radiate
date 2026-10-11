@@ -1,0 +1,11 @@
+.update-pill { display: block; width: 3.6rem; border: 0; border-radius: 999px; font: inherit; }
+.update-pill.busy { height: 0.3rem; background: var(--s3); overflow: hidden; margin: 0.4rem 0; }
+.update-pill-bar { display: block; height: 100%; width: 30%; background: var(--mute); border-radius: inherit; transition: width var(--t); }
+.update-pill.busy:not([aria-valuenow]) .update-pill-bar { animation: update-pill-slide 1.4s var(--ease) infinite; }
+.update-pill.ready { width: auto; padding: 0.35rem 0.6rem; background: var(--acc); color: var(--acc-ink); font-size: 0.7rem; font-weight: 800; line-height: 1.15; text-align: center; white-space: normal; max-width: 4.6rem; }
+.update-pill.ready:hover:not(:disabled) { filter: brightness(1.08); }
+.update-pill.ready:disabled { opacity: 0.6; }
+.update-status { color: var(--fg2); }
+.update-status.err { color: #ff8a80; }
+@keyframes update-pill-slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+@media (prefers-reduced-motion: reduce) { .update-pill-bar { animation: none !important; transition: none; } }

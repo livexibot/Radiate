@@ -2,7 +2,10 @@ mod support;
 
 use std::sync::Arc;
 
-use radiate_core::{ChannelQuery, ContentKind, Core, Error, MemorySecretStore, NewSource, Prefs};
+use radiate_core::{
+    ChannelQuery, ContentKind, Core, Error, Latency, LiveFormat, MemorySecretStore, NewSource,
+    Prefs,
+};
 use support::*;
 
 fn open(dir: &tempfile::TempDir) -> Core {
@@ -64,10 +67,32 @@ fn prefs_default_and_merge() {
         core.set_prefs(serde_json::json!([1])),
         Err(Error::Invalid(_))
     ));
+    assert!(matches!(
+        core.set_prefs(serde_json::json!({ "latency": "instant" })),
+        Err(Error::Invalid(_))
+    ));
+    let prefs = core
+        .set_prefs(serde_json::json!({
+            "latency": "low",
+            "liveFormat": "ts",
+            "sportsGroups": { "include": ["g1"], "exclude": [] }
+        }))
+        .unwrap();
+    assert_eq!(prefs.latency, Latency::Low);
+    assert_eq!(prefs.live_format, LiveFormat::Ts);
     drop(core);
 
     let reopened = open(&dir);
     assert!(reopened.prefs().unwrap().muted);
+    // Fields the core doesn't know come back as they were stored.
+    let prefs = serde_json::to_value(reopened.prefs().unwrap()).unwrap();
+    assert_eq!(prefs["somethingNew"], serde_json::json!(true));
+    assert_eq!(
+        prefs["sportsGroups"],
+        serde_json::json!({ "include": ["g1"], "exclude": [] })
+    );
+    assert_eq!(prefs["latency"], serde_json::json!("low"));
+    assert_eq!(prefs["liveFormat"], serde_json::json!("ts"));
     assert!(reopened
         .export_settings(false)
         .unwrap()

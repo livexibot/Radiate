@@ -7,6 +7,8 @@ mod error;
 mod mpv;
 mod secrets;
 mod state;
+mod updater;
+mod youtube;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -64,6 +66,8 @@ fn main() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(setup)
         .on_window_event(|window, event| {
             if let WindowEvent::Destroyed = event {
@@ -92,6 +96,7 @@ fn main() {
             commands::epg_set_match,
             commands::epg_unmatched,
             commands::vod_list,
+            commands::vod_get,
             commands::series_info,
             commands::progress_set,
             commands::continue_watching,
@@ -106,6 +111,11 @@ fn main() {
             commands::mpv_available,
             commands::mpv_open,
             commands::app_info,
+            updater::update_installs_in_background,
+            updater::update_prepare,
+            youtube::youtube_resolve,
+            youtube::youtube_live_now,
+            youtube::reactor_embed_url,
         ])
         .build(tauri::generate_context!())
         .expect("Radiate failed to start")

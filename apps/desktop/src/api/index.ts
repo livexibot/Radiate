@@ -121,6 +121,7 @@ export const api = {
   epgSetMatch: (channelId: string, epgChannelId: string | null) => call("epg_set_match", { channelId, epgChannelId }),
   epgUnmatched: (sourceId?: string | null) => call("epg_unmatched", { sourceId: sourceId ?? null }),
   vodList: (query: VodQuery) => call("vod_list", { query }),
+  vodGet: (id: string) => call("vod_get", { id }),
   seriesInfo: (id: string) => call("series_info", { id }),
   progressSet: (itemId: string, positionSecs: number, durationSecs: number) =>
     call("progress_set", { itemId, positionSecs, durationSecs }),

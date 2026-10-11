@@ -3,6 +3,7 @@
 // URL switches: `?mock=empty` starts with no sources (onboarding), `?mock=big` adds 20,000 channels.
 
 import type { Transport } from "./index";
+import { isSportsCategory } from "../lib/sports";
 import { ApiError } from "./errors";
 import {
   COUNTRIES,
@@ -50,6 +51,8 @@ import type {
 
 const TEST_STREAM = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
 const TEST_STREAM_HD = "https://test-streams.mux.dev/x36xhzz/url_0/193039199_mp4_h264_aac_hd_7.m3u8";
+
+const BULK_LABELS: Record<string, string> = { US: "Sports US", Motor: "Motorsport", Fight: "Boxing", Racket: "Tennis", More: "Sports", PPV: "PPV" };
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -109,6 +112,9 @@ class MockBackend {
     onboarded: true,
     favoritesOrder: [],
     epgRefreshHours: 12,
+    latency: "normal",
+    liveFormat: "auto",
+    sportsGroups: { include: [], exclude: [] },
   };
   private seq = 1;
   private readonly epoch = Date.now();
@@ -136,7 +142,8 @@ class MockBackend {
       const groupNames = Object.keys(PROGRAMME_POOLS);
       for (let i = 0; i < 20_000; i++) {
         const g = groupNames[i % groupNames.length] as string;
-        defs.push({ name: `${g} ${String(Math.floor(i / groupNames.length) + 1).padStart(4, "0")}`, group: `${g} ${(i % 40) + 1}` });
+        const label = BULK_LABELS[g] ?? g;
+        defs.push({ name: `${label} ${String(Math.floor(i / groupNames.length) + 1).padStart(4, "0")}`, group: `${label} ${(i % 40) + 1}`, pool: g });
       }
       this.addChannels(bulk, defs, 1000);
     }
@@ -211,7 +218,7 @@ class MockBackend {
       const g = this.groupFor(source, d.group, "live");
       g.itemCount++;
       const key = hashString(`${d.name}|${i}`).toString(36);
-      const pool = d.group.replace(/ \d+$/, "");
+      const pool = d.pool ?? d.group.replace(/ \d+$/, "");
       this.channels.push({
         id: `${source.id}:${key}`,
         sourceId: source.id,
@@ -329,18 +336,33 @@ class MockBackend {
     const anchorStart = feat
       ? Math.floor((now + feat.startOffsetMin * MIN) / fiveMin) * fiveMin
       : Math.floor((now - r() * anchorMinutes * 0.8 * MIN) / fiveMin) * fiveMin;
-    const mk = (start: number, minutes: number, title?: string, description?: string | null): Programme => ({
+    const sport = isSportsCategory(pool.category);
+    // avoid the same title twice in a row, which no real channel does
+    const anyTitle = () => {
+      const f = pool.fixtures;
+      if (!f || r() > f.share) return pick(r, pool.titles);
+      const a = pick(r, f.teams);
+      let b = pick(r, f.teams);
+      while (b === a) b = pick(r, f.teams);
+      return `${pick(r, f.prefixes)}${a}${f.sep}${b}`;
+    };
+    const freshTitle = (avoid: (Programme | undefined)[]) => {
+      let title = anyTitle();
+      for (let i = 0; i < 8 && avoid.some((p) => p?.title === title); i++) title = anyTitle();
+      return title;
+    };
+    const mk = (start: number, minutes: number, title: string, description?: string | null): Programme => ({
       channelId: ch.id,
       start,
       stop: start + minutes * MIN,
-      title: title ?? pick(r, pool.titles),
-      description: description === undefined ? pick(r, DESCRIPTIONS) : description,
+      title,
+      description: description === undefined ? (sport ? null : pick(r, DESCRIPTIONS)) : description,
       category: pool.category,
     });
-    const out: Programme[] = [mk(anchorStart, anchorMinutes, feat?.title, feat?.description ?? null)];
+    const out: Programme[] = [mk(anchorStart, anchorMinutes, feat?.title ?? anyTitle(), feat?.description ?? null)];
     let t = anchorStart + anchorMinutes * MIN;
     while (t < to) {
-      const p = mk(t, pick(r, pool.minutes));
+      const p = mk(t, pick(r, pool.minutes), freshTitle([out[out.length - 1], out[out.length - 2]]));
       out.push(p);
       t = p.stop;
     }
@@ -348,7 +370,7 @@ class MockBackend {
     const before: Programme[] = [];
     while (t > from) {
       const minutes = pick(r, pool.minutes);
-      const p = mk(t - minutes * MIN, minutes);
+      const p = mk(t - minutes * MIN, minutes, freshTitle([before[before.length - 1] ?? out[0], before[before.length - 2]]));
       before.push(p);
       t = p.start;
     }
@@ -398,6 +420,15 @@ class MockBackend {
     }
     const { updatedAt: _u, kindHint: _k, ...rest } = v;
     return { ...rest, progress };
+  }
+
+  /** An episode shaped like core's continue-watching / vod_get entry. */
+  episodeItem(ep: MockEpisode): VodItem | null {
+    const series = this.vod.find((v) => v.id === ep.seriesId);
+    if (!series) return null;
+    const rec = this.progress.get(ep.id);
+    const { updatedAt: _u, kindHint: _k, ...rest } = series;
+    return { ...rest, id: ep.id, progress: rec ? Math.min(1, rec.position / rec.duration) : null, seriesId: series.id, episodeId: ep.id, season: ep.season, episode: ep.episode, episodeTitle: ep.title };
   }
 
   latestEpisode(seriesId: string): { ep: MockEpisode; rec: ProgressRec } | null {
@@ -752,6 +783,16 @@ class MockBackend {
       }
       case "vod_list":
         return this.queryVod(a.query as VodQuery);
+      case "vod_get": {
+        const id = a.id as string;
+        const v = this.vod.find((x) => x.id === id);
+        if (v) return this.vodWithProgress(v);
+        const seriesId = id.slice(0, Math.max(0, id.lastIndexOf(":e")));
+        const ep = this.vod.some((x) => x.id === seriesId) ? this.episodesFor(seriesId).find((e) => e.id === id) : undefined;
+        const item = ep ? this.episodeItem(ep) : null;
+        if (!item) throw new ApiError("not_found", "This movie is no longer in your sources.");
+        return item;
+      }
       case "series_info": {
         const v = this.vod.find((x) => x.id === (a.id as string));
         if (!v) throw new ApiError("not_found", "That series is no longer in your sources.");
@@ -781,7 +822,11 @@ class MockBackend {
             if (p && p.position / p.duration < 0.95) items.push({ item: this.vodWithProgress(v), at: p.updatedAt });
           } else if (v.kind === "series") {
             const l = this.latestEpisode(v.id);
-            if (l) items.push({ item: this.vodWithProgress(v), at: l.rec.updatedAt });
+            if (!l) continue;
+            const eps = this.episodesFor(v.id);
+            const ep = l.rec.position / l.rec.duration < 0.95 ? l.ep : eps[eps.indexOf(l.ep) + 1];
+            const item = ep ? this.episodeItem(ep) : null;
+            if (item) items.push({ item, at: l.rec.updatedAt });
           }
         }
         return items.sort((x, y) => y.at - x.at).slice(0, a.limit as number).map((x) => x.item);
@@ -813,7 +858,7 @@ class MockBackend {
         return { sessionId: session.id };
       }
       case "app_info":
-        return { version: "0.1.0", dataDir: "~/.local/share/radiate" };
+        return { version: "0.2.0", dataDir: "~/.local/share/radiate" };
     }
   }
 }

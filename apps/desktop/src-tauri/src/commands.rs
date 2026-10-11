@@ -244,6 +244,11 @@ pub async fn vod_list(state: State<'_, AppState>, query: VodQuery) -> CmdResult<
 }
 
 #[tauri::command]
+pub async fn vod_get(state: State<'_, AppState>, id: String) -> CmdResult<VodItem> {
+    blocking(&state.core, move |c| c.vod_get(&id)).await
+}
+
+#[tauri::command]
 pub async fn series_info(state: State<'_, AppState>, id: String) -> CmdResult<SeriesInfo> {
     Ok(state.core.series_info(&id).await?)
 }

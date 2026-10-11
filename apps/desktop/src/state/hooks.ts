@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, type Channel, type ContentKind, type Group, type NowNext } from "../api";
-import { pagesFor } from "../lib/virtual";
+import { api, type Channel, type ContentKind, type Group, type NowNext, type Page } from "../api";
+import { pagesFor, segmentsFor } from "../lib/virtual";
+import { readOverrides, type SportsOverrides } from "../lib/sports";
 import { useApp } from "./app";
 
 /** Current time, re-rendered every `ms`. */
@@ -55,6 +56,10 @@ export interface ChannelFilter {
   groupId: string | null;
   favoritesOnly: boolean;
   search?: string | null;
+  /** several groups shown as one list, in this order (takes the place of groupId) */
+  groupIds?: string[] | null;
+  /** load nothing yet (the screen is still deciding what to show) */
+  paused?: boolean;
 }
 
 const PAGE = 100;
@@ -68,17 +73,33 @@ export function usePagedChannels(filter: ChannelFilter) {
   const stale = useRef(new Map<number, Channel[]>());
   const pending = useRef(new Set<number>());
   const gen = useRef(0);
-  const filterKey = `${filter.groupId}|${filter.favoritesOnly}|${filter.search ?? ""}`;
+  // per-group totals when several groups are shown as one list
+  const parts = useRef<Promise<number[]> | null>(null);
+  const multi = filter.groupIds ?? null;
+  const filterKey = `${filter.groupId}|${filter.favoritesOnly}|${filter.search ?? ""}|${multi ? multi.join(",") : "-"}|${filter.paused ? "p" : ""}`;
   const lastFilter = useRef(filterKey);
   const key = `${filterKey}|${version}`;
 
+  const fetchRange = useCallback(
+    async (offset: number, limit: number): Promise<Page<Channel>> => {
+      const base = { favoritesOnly: filter.favoritesOnly, includeHidden: false, search: filter.search || null };
+      if (!multi) return api.channelsList({ ...base, groupId: filter.groupId, offset, limit });
+      parts.current ??= Promise.all(multi.map((groupId) => api.channelsList({ ...base, groupId, offset: 0, limit: 1 }).then((p) => p.total)));
+      const totals = await parts.current;
+      const lists = await Promise.all(segmentsFor(totals, offset, offset + limit).map((seg) => api.channelsList({ ...base, groupId: multi[seg.part], offset: seg.offset, limit: seg.limit }).then((p) => p.items)));
+      return { total: totals.reduce((a, b) => a + b, 0), items: lists.flat() };
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key],
+  );
+
   const load = useCallback(
     (page: number) => {
+      if (filter.paused) return;
       if (pages.current.has(page) || pending.current.has(page)) return;
       pending.current.add(page);
       const g = gen.current;
-      api
-        .channelsList({ groupId: filter.groupId, favoritesOnly: filter.favoritesOnly, includeHidden: false, search: filter.search || null, offset: page * PAGE, limit: PAGE })
+      fetchRange(page * PAGE, PAGE)
         .then((res) => {
           if (g !== gen.current) return;
           pending.current.delete(page);
@@ -92,11 +113,12 @@ export function usePagedChannels(filter: ChannelFilter) {
         });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [key],
+    [key, fetchRange],
   );
 
   useEffect(() => {
     gen.current++;
+    parts.current = null;
     // same list, new data version (favorite toggled, refresh...): keep showing old rows until pages reload
     const sameList = lastFilter.current === filterKey;
     lastFilter.current = filterKey;
@@ -178,4 +200,12 @@ export function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): { data: T | n
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, n]);
   return { data, error, loading, reload: () => setN((x) => x + 1) };
+}
+
+/** The user's sports group choices from prefs. */
+export function useSportsOverrides(): SportsOverrides {
+  const { prefs } = useApp();
+  // keyed by content: prefs objects are replaced on every save (volume, last channel...)
+  const key = JSON.stringify(prefs?.sportsGroups ?? null);
+  return useMemo(() => readOverrides({ sportsGroups: JSON.parse(key) as SportsOverrides | null }), [key]);
 }

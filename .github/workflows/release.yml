@@ -1,7 +1,8 @@
 # Builds the installers for Windows, macOS and Linux and attaches them to
-# a release. release-please.yml calls it when a release is created. Running
-# it by hand (Actions, Release, Run workflow) or pushing a v* tag makes the
-# release itself.
+# a release, with the signed update files and latest.json the app's updater
+# reads. release-please.yml calls it when a release is created. Running it
+# by hand (Actions, Release, Run workflow) or pushing a v* tag makes the
+# release itself. Needs the TAURI_SIGNING_PRIVATE_KEY secret.
 name: Release
 
 on:
@@ -14,9 +15,9 @@ on:
         type: string
         required: true
       draft:
-        description: Keep the release as a draft
+        description: Keep the release as a draft (the updater ignores drafts)
         type: boolean
-        default: true
+        default: false
   workflow_call:
     inputs:
       tag:
@@ -30,7 +31,20 @@ permissions:
   contents: write
 
 jobs:
+  signing-key:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the updater signing key
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error title=Missing signing key::Add the updater private key as the repository secret TAURI_SIGNING_PRIVATE_KEY (Settings, Secrets and variables, Actions). Without it the release can't be updated to."
+            exit 1
+          fi
+
   build:
+    needs: signing-key
     strategy:
       fail-fast: false
       matrix:
@@ -66,11 +80,15 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           args: ${{ matrix.args }}
           tagName: ${{ inputs.tag || github.ref_name }}
           releaseName: Radiate v__VERSION__
           releaseBody: See the changelog for what's new.
-          releaseDraft: ${{ !inputs.tag || inputs.draft }}
+          releaseDraft: ${{ inputs.draft == true }}
           prerelease: false
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true

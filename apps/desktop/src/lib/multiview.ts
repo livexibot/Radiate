@@ -1,5 +1,6 @@
 // How many multiview tiles each source can still fill, given connections_status.
-import type { ConnectionUsage } from "../api/types";
+import type { Channel, ConnectionUsage, NowNext } from "../api/types";
+import { isFiller, isSportsChannel, isSportsProgramme, NO_OVERRIDES, type SportsOverrides } from "./sports";
 
 export type Layout = "1+3" | "2x2";
 export const TILE_COUNT = 4;
@@ -85,4 +86,23 @@ export function moveFocus(layout: Layout, index: number, key: "ArrowLeft" | "Arr
   if (key === "ArrowUp") return Math.max(1, index - 1);
   if (key === "ArrowDown") return Math.min(3, index + 1);
   return index;
+}
+
+/**
+ * Order multiview suggestions: the seed's group, then groups with the same name in other
+ * sources, then other sports groups. Within each, live sports events come before the rest.
+ */
+export function rankSuggestions(seed: Channel, channels: Channel[], nn: Record<string, NowNext>, at: number, overrides: SportsOverrides = NO_OVERRIDES): Channel[] {
+  const seen = new Set<string>([seed.id]);
+  const tier = (c: Channel) => (c.groupId === seed.groupId ? 0 : c.groupName === seed.groupName ? 1 : isSportsChannel(c, nn[c.id]?.now, overrides) ? 2 : 3);
+  const live = (c: Channel) => {
+    const p = nn[c.id]?.now;
+    if (!p || p.start > at || p.stop <= at) return 2;
+    return isSportsProgramme(p) && !isFiller(p.title) ? 0 : 1;
+  };
+  return channels
+    .filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)))
+    .map((c, i) => ({ c, i, t: tier(c), l: live(c) }))
+    .sort((a, b) => a.t - b.t || a.l - b.l || a.i - b.i)
+    .map((x) => x.c);
 }

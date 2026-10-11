@@ -109,6 +109,55 @@ async fn vod(State(st): State<Arc<Stats>>, headers: HeaderMap) -> Response {
         .into_response()
 }
 
+/// A movie sent slowly (like a provider with a speed cap), honouring Range.
+async fn slow_vod(State(st): State<Arc<Stats>>, headers: HeaderMap) -> Response {
+    let guard = ConnGuard::new(&st);
+    let data = vod_bytes();
+    let start: usize = headers
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|r| {
+            r.trim_start_matches("bytes=")
+                .split('-')
+                .next()?
+                .parse()
+                .ok()
+        })
+        .unwrap_or(0);
+    let total = data.len();
+    let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(1);
+    tokio::spawn(async move {
+        let _g = guard;
+        for chunk in data[start..].chunks(1000) {
+            tokio::select! {
+                _ = tx.closed() => return,
+                r = tx.send(Ok(Bytes::copy_from_slice(chunk))) => if r.is_err() { return },
+            }
+            tokio::select! {
+                _ = tx.closed() => return,
+                _ = tokio::time::sleep(Duration::from_millis(20)) => {}
+            }
+        }
+    });
+    let mut r = Response::new(Body::from_stream(ReceiverStream::new(rx)));
+    if start > 0 {
+        *r.status_mut() = StatusCode::PARTIAL_CONTENT;
+    }
+    let h = r.headers_mut();
+    h.insert(header::CONTENT_TYPE, "video/mp4".parse().unwrap());
+    h.insert(header::ACCEPT_RANGES, "bytes".parse().unwrap());
+    h.insert(header::CONTENT_LENGTH, (total - start).into());
+    if start > 0 {
+        h.insert(
+            header::CONTENT_RANGE,
+            format!("bytes {start}-{}/{total}", total - 1)
+                .parse()
+                .unwrap(),
+        );
+    }
+    r
+}
+
 const MASTER: &str = "#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"a\",NAME=\"en\",URI=\"audio/en.m3u8\"\n#EXT-X-STREAM-INF:BANDWIDTH=800000,AUDIO=\"a\"\nv1/media.m3u8\n";
 const MEDIA: &str = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-KEY:METHOD=AES-128,URI=\"/keys/k1\"\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:6,\nseg1.ts\n#EXTINF:6,\nhttp://127.0.0.1:1/elsewhere/seg2.ts\n";
 
@@ -149,6 +198,7 @@ async fn upstream() -> (String, Arc<Stats>) {
             }),
         )
         .route("/vod.mp4", get(vod))
+        .route("/slow.mp4", get(slow_vod))
         .route(
             "/hls/master.m3u8",
             get(|| async {
@@ -436,6 +486,70 @@ async fn range_requests_pass_through() {
     assert_eq!(full.status(), 200);
     assert_eq!(full.headers()["content-type"], "video/mp4");
     assert_eq!(full.bytes().await.unwrap(), vod_bytes());
+}
+
+#[tokio::test]
+async fn seeking_a_movie_replaces_its_one_connection() {
+    let (base, stats) = upstream().await;
+    let hub = StreamHub::start_with(cfg()).await.unwrap();
+    let s = hub
+        .open(req("s1", format!("{base}/slow.mp4"), Some(1)))
+        .unwrap();
+    let c = client();
+    let mut first = c.get(&s.local_url).send().await.unwrap();
+    assert_eq!(first.status(), 200);
+    assert!(first.chunk().await.unwrap().is_some());
+    // Seek: the player asks for a range while the first read is still open.
+    for start in [60_000usize, 20_000, 90_000] {
+        let r = c
+            .get(&s.local_url)
+            .header("Range", format!("bytes={start}-"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 206);
+        assert_eq!(
+            r.headers()["content-range"],
+            format!("bytes {start}-99999/100000").as_str()
+        );
+        let mut r = r;
+        let chunk = r.chunk().await.unwrap().unwrap();
+        assert_eq!(chunk[..], vod_bytes()[start..start + chunk.len()]);
+        assert_eq!(stats.active.load(Ordering::SeqCst), 1);
+    }
+    // The first read was cut off, not left holding a second connection.
+    let rest = tokio::time::timeout(Duration::from_secs(3), async {
+        while let Ok(Some(_)) = first.chunk().await {}
+    })
+    .await;
+    assert!(rest.is_ok(), "the replaced read ends");
+    assert_eq!(
+        stats.max_active.load(Ordering::SeqCst),
+        1,
+        "never two upstream connections"
+    );
+    assert_eq!(stats.hits.load(Ordering::SeqCst), 4);
+    assert_eq!(hub.in_use("s1"), 1);
+}
+
+#[tokio::test]
+async fn a_paused_movie_keeps_its_session() {
+    let (base, _) = upstream().await;
+    let hub = StreamHub::start_with(cfg()).await.unwrap();
+    let s = hub
+        .open(req("s1", format!("{base}/slow.mp4"), Some(1)))
+        .unwrap();
+    let c = client();
+    let mut r = c.get(&s.local_url).send().await.unwrap();
+    assert!(r.chunk().await.unwrap().is_some());
+    // Paused: the player stops reading but keeps the response open, for
+    // longer than the idle timeout.
+    tokio::time::sleep(cfg().idle_timeout * 3).await;
+    assert_eq!(hub.in_use("s1"), 1, "a paused movie is not idle");
+    assert!(r.chunk().await.unwrap().is_some(), "and it carries on");
+    drop(r);
+    tokio::time::sleep(cfg().idle_timeout * 3).await;
+    assert_eq!(hub.in_use("s1"), 0, "closed once the player let go");
 }
 
 #[tokio::test]

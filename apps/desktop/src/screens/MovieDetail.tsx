@@ -1,4 +1,5 @@
-import { api, type VodItem } from "../api";
+import { api } from "../api";
+import { resumeFraction } from "../player/vodLogic";
 import { Icon } from "../components/Icon";
 import { Progress } from "../components/Progress";
 import { Skeleton } from "../components/Skeleton";
@@ -6,23 +7,11 @@ import { tone } from "../lib/monogram";
 import { useApp } from "../state/app";
 import { useLoad } from "../state/hooks";
 
-/** Movie detail. The contract has no single-item VOD call, so the item is found through vod_list. */
-async function findMovie(id: string): Promise<VodItem> {
-  const page = 500;
-  for (let offset = 0; offset < 20_000; offset += page) {
-    const p = await api.vodList({ kind: "movie", offset, limit: page });
-    const hit = p.items.find((x) => x.id === id);
-    if (hit) return hit;
-    if (offset + page >= p.total) break;
-  }
-  throw new Error("This movie is no longer in your sources.");
-}
-
 export function MovieDetail({ id }: { id: string }) {
   const { navigate, back, version, sourceName } = useApp();
-  const { data: m, error } = useLoad(() => findMovie(id), [id, version]);
+  const { data: m, error } = useLoad(() => api.vodGet(id), [id, version]);
   const play = (resume?: number) => navigate({ name: "player", target: { type: "movie", id }, resume, title: m?.name });
-  const inProgress = !!m?.progress && m.progress > 0.01 && m.progress < 0.95;
+  const inProgress = resumeFraction(m?.progress) !== undefined;
 
   return (
     <div className="screen detail">

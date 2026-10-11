@@ -219,10 +219,7 @@ async fn xtream_account_end_to_end() {
         episode.upstream_url,
         format!("{}/series/demo/demo-pass/70012.mkv", server.base)
     );
-    assert_eq!(
-        episode.title,
-        "Harbor Tales S01E02 · Harbor Tales - S01E02 - Storm"
-    );
+    assert_eq!(episode.title, "Harbor Tales S01E02 · Storm");
 
     // Cached: no second request, and served even when the provider is down.
     down.store(true, Ordering::SeqCst);
@@ -261,8 +258,44 @@ async fn xtream_account_end_to_end() {
     assert_eq!(cw.len(), 2, "finished items are left out");
     assert_eq!(cw[0].id, s1[1].id);
     assert_eq!(cw[0].kind, ContentKind::Series);
-    assert_eq!(cw[0].name, "Harbor Tales S01E02");
+    assert_eq!(cw[0].name, "Harbor Tales");
+    assert_eq!(
+        cw[0].series_id.as_deref(),
+        Some(series.items[0].id.as_str())
+    );
+    assert_eq!(cw[0].episode_id.as_deref(), Some(s1[1].id.as_str()));
+    assert_eq!((cw[0].season, cw[0].episode), (Some(1), Some(2)));
+    assert_eq!(cw[0].episode_title.as_deref(), Some("Storm"));
     assert_eq!(cw[1].progress, Some(0.1));
+    assert_eq!(cw[1].series_id, None);
+
+    // One item by id: a movie, a series, or an episode shaped like the above.
+    assert_eq!(core.vod_get(&movies.items[0].id).unwrap(), cw[1]);
+    assert_eq!(
+        core.vod_get(&series.items[0].id).unwrap().kind,
+        ContentKind::Series
+    );
+    assert_eq!(core.vod_get(&s1[1].id).unwrap(), cw[0]);
+    assert!(matches!(core.vod_get("nope"), Err(Error::NotFound(_))));
+
+    // A finished episode makes room for the next one, even in a new season.
+    core.set_progress(&s1[1].id, 2660.0, 2670.0).unwrap();
+    let cw = core.continue_watching(10).unwrap();
+    assert_eq!(
+        cw[0].episode_id.as_deref(),
+        Some(info.seasons[1].episodes[0].id.as_str())
+    );
+    assert_eq!(
+        (cw[0].season, cw[0].episode, cw[0].progress),
+        (Some(2), Some(1), None)
+    );
+    assert_eq!(cw.len(), 2);
+    // The last episode finished: the series leaves the row.
+    let last = info.seasons[1].episodes.last().unwrap();
+    core.set_progress(&last.id, 100.0, 100.0).unwrap();
+    let cw = core.continue_watching(10).unwrap();
+    assert_eq!(cw.len(), 1);
+    assert_eq!(cw[0].id, movies.items[0].id);
     let with_progress = core
         .vod(&VodQuery {
             kind: ContentKind::Movie,

@@ -8,13 +8,17 @@ import { Modal } from "../components/Modal";
 import { Skeleton } from "../components/Skeleton";
 import { ago, DAY, shortDate } from "../lib/time";
 import { useApp, type SettingsSection } from "../state/app";
-import { useLoad } from "../state/hooks";
+import { isSportsGroup, toggleSportsGroup } from "../lib/sports";
+import { useLoad, useSportsOverrides } from "../state/hooks";
+import { ReactorList } from "../reactor/ReactorList";
+import { UpdateSection } from "../updater";
 import { EpgMatchPicker } from "./EpgMatchPicker";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "sources", label: "Sources & guides" },
   { id: "channels", label: "Channels & groups" },
   { id: "playback", label: "Playback" },
+  { id: "reactors", label: "Reactors" },
   { id: "backup", label: "Backup" },
   { id: "about", label: "About" },
 ];
@@ -39,6 +43,7 @@ export function Settings({ section }: { section?: SettingsSection }) {
           {current === "sources" ? <SourcesSection /> : null}
           {current === "channels" ? <ChannelsSection /> : null}
           {current === "playback" ? <PlaybackSection /> : null}
+          {current === "reactors" ? <ReactorList /> : null}
           {current === "backup" ? <BackupSection /> : null}
           {current === "about" ? <AboutSection /> : null}
         </div>
@@ -345,7 +350,8 @@ function UnmatchedList({ channels, onClose }: { channels: Channel[]; onClose: ()
 // ---------- Channels & groups ----------
 
 function ChannelsSection() {
-  const { version, bump, toast, sourceName } = useApp();
+  const { version, bump, toast, sourceName, setPrefs } = useApp();
+  const overrides = useSportsOverrides();
   const { data: groups, reload } = useLoad(() => api.groupsList("live", true), [version]);
   const [numbersFor, setNumbersFor] = useState<string | null>(null);
   const { data: hidden, reload: reloadHidden } = useLoad(
@@ -392,6 +398,7 @@ function ChannelsSection() {
               <div className={g.hidden ? "grow-set off" : "grow-set"} key={g.id}>
                 <input type="checkbox" className="toggle" checked={!g.hidden} onChange={(e) => void setHidden(g, !e.target.checked)} aria-label={`Show ${g.name}`} />
                 <span className="ellipsis grow-name">{g.name}</span>
+                <SportsTag on={isSportsGroup(g, overrides)} name={g.name} onToggle={() => void setPrefs({ sportsGroups: toggleSportsGroup(overrides, g) })} />
                 <span className="mute ellipsis">{sourceName(g.sourceId)}</span>
                 <span className="mute num">{g.itemCount}</span>
                 <button type="button" className="icon-btn" aria-label={`Channel numbers in ${g.name}`} onClick={() => setNumbersFor(g.id)}>
@@ -439,6 +446,14 @@ function ChannelsSection() {
       </section>
       {numbersFor ? <NumbersModal groupId={numbersFor} name={order?.find((g) => g.id === numbersFor)?.name ?? ""} onClose={() => setNumbersFor(null)} /> : null}
     </div>
+  );
+}
+
+function SportsTag({ on, name, onToggle }: { on: boolean; name: string; onToggle: () => void }) {
+  return (
+    <button type="button" className={on ? "sport-tag on" : "sport-tag"} aria-pressed={on} aria-label={`${name} is sports`} onClick={onToggle}>
+      <Icon name="ball" /> Sports
+    </button>
   );
 }
 
@@ -508,6 +523,32 @@ function PlaybackSection() {
           <input type="checkbox" className="toggle" checked={prefs.muted} onChange={(e) => void setPrefs({ muted: e.target.checked })} aria-label="Muted" />
         </div>
         <div className="set-row">
+          <span>Latency</span>
+          <Segmented
+            label="Latency"
+            value={prefs.latency ?? "normal"}
+            options={[
+              { id: "low", label: "Low" },
+              { id: "normal", label: "Normal" },
+              { id: "stable", label: "Stable" },
+            ]}
+            onChange={(v) => void setPrefs({ latency: v })}
+          />
+        </div>
+        <div className="set-row">
+          <span>Live format</span>
+          <Segmented
+            label="Live format"
+            value={prefs.liveFormat ?? "auto"}
+            options={[
+              { id: "auto", label: "Auto" },
+              { id: "ts", label: "MPEG-TS" },
+              { id: "hls", label: "HLS" },
+            ]}
+            onChange={(v) => void setPrefs({ liveFormat: v })}
+          />
+        </div>
+        <div className="set-row">
           <span>Guide refresh</span>
           <select className="input select" value={prefs.epgRefreshHours} onChange={(e) => void setPrefs({ epgRefreshHours: Number(e.target.value) })} aria-label="Guide refresh interval">
             {[6, 12, 24, 48].map((h) => (
@@ -518,6 +559,18 @@ function PlaybackSection() {
           </select>
         </div>
       </section>
+    </div>
+  );
+}
+
+function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { id: T; label: string }[]; onChange: (v: T) => void }) {
+  return (
+    <div className="seg" role="radiogroup" aria-label={label}>
+      {options.map((o) => (
+        <button type="button" key={o.id} role="radio" aria-checked={o.id === value} className={o.id === value ? "on" : ""} onClick={() => onChange(o.id)}>
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -607,6 +660,7 @@ function AboutSection() {
           <dd className="mono">{data?.dataDir ?? "…"}</dd>
         </dl>
       </section>
+      <UpdateSection />
     </div>
   );
 }

@@ -53,6 +53,11 @@ pub(super) fn vod_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<VodItem> {
         rating: r.get(8)?,
         plot: r.get(9)?,
         progress: ratio(r.get(10)?, r.get(11)?),
+        series_id: None,
+        episode_id: None,
+        season: None,
+        episode: None,
+        episode_title: None,
     })
 }
 
@@ -444,63 +449,64 @@ impl Core {
         Ok(())
     }
 
-    /// Movies and episodes started but not finished, most recent first. An
-    /// episode appears as `kind: series` with its episode id; one per series.
+    /// Movies and episodes to carry on with, most recent first: movies
+    /// started but not finished; for a series (one entry each), the episode
+    /// watched last, or the one after it when that one was finished. An
+    /// episode appears as `kind: series` with its episode id and the
+    /// episode fields set (see [`Core::vod_get`]).
     pub fn continue_watching(&self, limit: u32) -> Result<Vec<VodItem>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT item_id FROM progress WHERE duration > 0 AND position >= 1 AND position < duration * 0.95 \
-             ORDER BY updated_at DESC",
+            "SELECT item_id, position < duration * 0.95 FROM progress WHERE duration > 0 AND position >= 1 \
+             ORDER BY updated_at DESC, rowid DESC",
         )?;
-        let ids = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
         let mut out = Vec::new();
         let mut series_seen = HashSet::new();
-        for id in ids {
+        for (id, unfinished) in rows {
             if out.len() >= limit as usize {
                 break;
             }
-            let id = id?;
             if let Some(item) = vod_item(&conn, &id)? {
-                out.push(item);
+                if unfinished && item.kind == ContentKind::Movie {
+                    out.push(item);
+                }
                 continue;
             }
-            let episode = conn
-                .query_row(
-                    "SELECT series_id, season, episode, still FROM episodes WHERE id = ?1",
-                    [&id],
-                    |r| {
-                        Ok((
-                            r.get::<_, String>(0)?,
-                            r.get::<_, u32>(1)?,
-                            r.get::<_, u32>(2)?,
-                            r.get::<_, Option<String>>(3)?,
-                        ))
-                    },
-                )
-                .optional()?;
-            let Some((series_id, season, number, still)) = episode else {
+            let Some(item) = episode_item(&conn, &id)? else {
+                continue;
+            };
+            let Some(series_id) = item.series_id.clone() else {
                 continue;
             };
             if !series_seen.insert(series_id.clone()) {
                 continue;
             }
-            if let Some(series) = vod_item(&conn, &series_id)? {
-                let progress = conn.query_row(
-                    "SELECT position, duration FROM progress WHERE item_id = ?1",
-                    [&id],
-                    |r| Ok(ratio(r.get(0)?, r.get(1)?)),
-                )?;
-                out.push(VodItem {
-                    name: format!("{} S{season:02}E{number:02}", series.name),
-                    poster: series.poster.or(still),
-                    id,
-                    progress,
-                    ..series
-                });
+            if unfinished {
+                out.push(item);
+            } else if let Some(next) = next_episode_id(&conn, &series_id, &id)? {
+                if let Some(next) = episode_item(&conn, &next)? {
+                    out.push(next);
+                }
             }
         }
         Ok(out)
     }
+}
+
+/// The episode after `episode_id` in season and episode order.
+fn next_episode_id(conn: &Connection, series_id: &str, episode_id: &str) -> Result<Option<String>> {
+    let mut stmt =
+        conn.prepare("SELECT id FROM episodes WHERE series_id = ?1 ORDER BY season, episode, id")?;
+    let ids = stmt
+        .query_map([series_id], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(ids
+        .iter()
+        .position(|i| i == episode_id)
+        .and_then(|i| ids.get(i + 1).cloned()))
 }
 
 fn page<T>(items: Vec<T>, offset: u32, limit: u32) -> Vec<T> {
@@ -520,6 +526,58 @@ pub(super) fn channel_by_id(conn: &Connection, id: &str) -> Result<Channel> {
     )
     .optional()?
     .ok_or_else(|| Error::not_found("Channel", id))
+}
+
+impl Core {
+    /// One movie, series or episode by id. An episode comes back like a
+    /// continue-watching entry: `kind: series`, its own id, the series' name
+    /// and poster, and `seriesId`, `episodeId`, `season`, `episode`,
+    /// `episodeTitle` set.
+    pub fn vod_get(&self, id: &str) -> Result<VodItem> {
+        let conn = self.conn();
+        if let Some(item) = vod_item(&conn, id)? {
+            return Ok(item);
+        }
+        episode_item(&conn, id)?.ok_or_else(|| Error::not_found("Movie", id))
+    }
+}
+
+/// An episode as a [`VodItem`] (see [`Core::vod_get`]).
+fn episode_item(conn: &Connection, id: &str) -> Result<Option<VodItem>> {
+    let row = conn
+        .query_row(
+            "SELECT e.series_id, e.season, e.episode, e.title, e.still, p.position, p.duration \
+             FROM episodes e LEFT JOIN progress p ON p.item_id = e.id WHERE e.id = ?1",
+            [id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, u32>(1)?,
+                    r.get::<_, u32>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                    ratio(r.get(5)?, r.get(6)?),
+                ))
+            },
+        )
+        .optional()?;
+    let Some((series_id, season, number, title, still, progress)) = row else {
+        return Ok(None);
+    };
+    let Some(series) = vod_item(conn, &series_id)? else {
+        return Ok(None);
+    };
+    Ok(Some(VodItem {
+        id: id.to_string(),
+        poster: series.poster.clone().or(still),
+        progress,
+        series_id: Some(series_id),
+        episode_id: Some(id.to_string()),
+        season: Some(season),
+        episode: Some(number),
+        episode_title: (!title.is_empty()).then_some(title),
+        ..series
+    }))
 }
 
 fn vod_item(conn: &Connection, id: &str) -> Result<Option<VodItem>> {

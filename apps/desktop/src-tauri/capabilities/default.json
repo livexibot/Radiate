@@ -12,6 +12,8 @@
     "opener:allow-open-url",
     "opener:allow-default-urls",
     "core:window:allow-set-fullscreen",
-    "core:window:allow-is-fullscreen"
+    "core:window:allow-is-fullscreen",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

@@ -7,10 +7,27 @@ use serde_json::{Map, Value};
 use super::sources::{apply_user_state, ProgressFn};
 use super::{load_source, load_sources, now_ms, parse_headers, Core};
 use crate::secrets::password_key;
-use crate::types::{PlayTarget, Prefs, Progress, ResolvedStream, SourceKind, StreamKind};
+use crate::types::{
+    LiveFormat, PlayTarget, Prefs, Progress, ResolvedStream, SourceKind, StreamKind,
+};
 use crate::{Error, Result};
 
 const PREFS_KEY: &str = "prefs";
+
+/// The Xtream live file (`{id}.{ext}`) for the user's live format: `auto`
+/// keeps what the refresh chose (HLS when offered, else MPEG-TS); `ts` and
+/// `hls` ask for that format when the provider allows it (an empty list of
+/// allowed formats means it doesn't say, so both are tried).
+pub(crate) fn live_file(file: &str, format: LiveFormat, allowed: &[String]) -> String {
+    let (id, ext) = file.rsplit_once('.').unwrap_or((file, "ts"));
+    let wanted = match format {
+        LiveFormat::Auto => return file.to_string(),
+        LiveFormat::Ts => "ts",
+        LiveFormat::Hls => "m3u8",
+    };
+    let ok = allowed.is_empty() || allowed.iter().any(|f| f.eq_ignore_ascii_case(wanted));
+    format!("{id}.{}", if ok { wanted } else { ext })
+}
 const EXPORT_VERSION: u32 = 1;
 
 impl Core {
@@ -46,11 +63,25 @@ impl Core {
             .ok_or_else(|| Error::not_found(what, id))?;
         let stream = stream.ok_or_else(|| Error::Invalid("This item can't be played.".into()))?;
         let source = load_source(&conn, &source_id)?;
+        let live_format = self.prefs_with(&conn)?.live_format;
+        let formats: Vec<String> = conn
+            .query_row(
+                "SELECT output_formats FROM sources WHERE id = ?1",
+                [&source_id],
+                |r| r.get::<_, Option<String>>(0),
+            )?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
         drop(conn);
         let upstream_url = match stream.strip_prefix("xt:") {
             Some(path) => {
                 let (kind, file) = path.split_once('/').unwrap_or(("live", path));
-                self.xtream_client(&source)?.stream_url(kind, file)
+                let file = if kind == "live" {
+                    live_file(file, live_format, &formats)
+                } else {
+                    file.to_string()
+                };
+                self.xtream_client(&source)?.stream_url(kind, &file)
             }
             None => stream,
         };
@@ -313,4 +344,22 @@ struct ExportChannel {
     number: Option<u32>,
     epg_set: bool,
     epg_channel_id: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_file_follows_the_format_the_provider_allows() {
+        let both = vec!["m3u8".to_string(), "ts".to_string()];
+        let ts_only = vec!["ts".to_string()];
+        let hls_only = vec!["M3U8".to_string()];
+        assert_eq!(live_file("7.m3u8", LiveFormat::Auto, &both), "7.m3u8");
+        assert_eq!(live_file("7.m3u8", LiveFormat::Ts, &both), "7.ts");
+        assert_eq!(live_file("7.ts", LiveFormat::Hls, &both), "7.m3u8");
+        assert_eq!(live_file("7.ts", LiveFormat::Hls, &ts_only), "7.ts");
+        assert_eq!(live_file("7.m3u8", LiveFormat::Ts, &hls_only), "7.m3u8");
+        assert_eq!(live_file("7.ts", LiveFormat::Hls, &[]), "7.m3u8");
+    }
 }

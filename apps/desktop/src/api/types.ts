@@ -1,5 +1,7 @@
 // Mirror of docs/contract.md sections 1-3. All ids are strings, all times are Unix ms.
 
+import type { OverlayPrefs, Reactor } from "../reactor/link";
+
 export type SourceKind = "m3u" | "xtream";
 export type SourceStatus = "idle" | "refreshing" | "error";
 
@@ -89,6 +91,12 @@ export interface VodItem {
   rating: number | null;
   plot: string | null;
   progress: number | null;
+  /** Episodes (continue watching, vod_get of an episode id): the series and the episode's place in it. */
+  seriesId?: string | null;
+  episodeId?: string | null;
+  season?: number | null;
+  episode?: number | null;
+  episodeTitle?: string | null;
 }
 
 export interface Episode {
@@ -166,6 +174,9 @@ export interface TrackPref {
   subtitle: string | null;
 }
 
+export type LatencyPref = "low" | "normal" | "stable";
+export type LiveFormatPref = "auto" | "ts" | "hls";
+
 export interface Prefs {
   lastChannelId: string | null;
   previousChannelId: string | null;
@@ -176,6 +187,16 @@ export interface Prefs {
   onboarded: boolean;
   favoritesOrder: string[];
   epgRefreshHours: number;
+  /** Live latency: "low" stays close to the live edge, "stable" keeps a deeper buffer. Default "normal". */
+  latency?: LatencyPref;
+  /** Live format to ask an Xtream provider for. Default "auto" (HLS when offered, else MPEG-TS). */
+  liveFormat?: LiveFormatPref;
+  /** Groups the user marked as sports, or not, by group id. Missing on older data. */
+  sportsGroups?: { include: string[]; exclude: string[] } | null;
+  /** Saved YouTube reactors (see reactor/link.ts). */
+  reactors?: Reactor[] | null;
+  /** Where the reactor overlay sits, its volume and how far the match is held back. */
+  reactorOverlay?: Partial<OverlayPrefs> | null;
 }
 
 export interface EpgCandidate {
@@ -287,6 +308,7 @@ export interface Commands {
   epg_set_match: [{ channelId: string; epgChannelId: string | null }, void];
   epg_unmatched: [{ sourceId?: string | null }, Channel[]];
   vod_list: [{ query: VodQuery }, Page<VodItem>];
+  vod_get: [{ id: string }, VodItem];
   series_info: [{ id: string }, SeriesInfo];
   progress_set: [{ itemId: string; positionSecs: number; durationSecs: number }, void];
   continue_watching: [{ limit: number }, VodItem[]];

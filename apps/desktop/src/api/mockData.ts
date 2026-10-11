@@ -3,53 +3,72 @@
 export interface ChannelDef {
   name: string;
   group: string;
+  /** programme pool; defaults to the group name without a trailing number */
+  pool?: string;
   favorite?: boolean;
   noGuide?: boolean;
   offline?: boolean;
 }
 
+const FOOTBALL = "Sports | Football";
+const US = "Sports | US";
+const MOTOR = "Sports | Motorsport";
+const FIGHT = "Sports | Fight";
+const RACKET = "Sports | Tennis & Golf";
+const MORE = "Sports | More";
+const PPV = "PPV Events";
+
 export const HOME_CHANNELS: ChannelDef[] = [
+  { name: "Arena Sports 1", group: FOOTBALL, pool: "Football", favorite: true },
+  { name: "Arena Sports 2", group: FOOTBALL, pool: "Football" },
+  { name: "Arena Sports 3", group: FOOTBALL, pool: "Football" },
+  { name: "Pitch One", group: FOOTBALL, pool: "Football", favorite: true },
+  { name: "Pitch Two", group: FOOTBALL, pool: "Football" },
+  { name: "Goal Zone", group: FOOTBALL, pool: "Football" },
+  { name: "Terrace TV", group: FOOTBALL, pool: "Football" },
+  { name: "Gridiron Network", group: US, pool: "US", favorite: true },
+  { name: "Hoops 24", group: US, pool: "US" },
+  { name: "Puck Central", group: US, pool: "US" },
+  { name: "Diamond TV", group: US, pool: "US" },
+  { name: "Courtside", group: US, pool: "US" },
+  { name: "Apex Motorsport", group: MOTOR, pool: "Motor" },
+  { name: "Pit Lane", group: MOTOR, pool: "Motor" },
+  { name: "Ringside 1", group: FIGHT, pool: "Fight" },
+  { name: "Octagon One", group: FIGHT, pool: "Fight" },
+  { name: "Baseline TV", group: RACKET, pool: "Racket" },
+  { name: "Green Fairway", group: RACKET, pool: "Racket" },
+  { name: "Velo TV", group: MORE, pool: "More" },
+  { name: "Oche Darts", group: MORE, pool: "More" },
+  { name: "Arena Extra", group: MORE, pool: "More" },
+  { name: "PPV Event 1", group: PPV, pool: "PPV" },
+  { name: "PPV Event 2", group: PPV, pool: "PPV" },
+  { name: "PPV Event 3", group: PPV, pool: "PPV", noGuide: true },
   { name: "Northwind News", group: "News", favorite: true },
   { name: "Harbor One", group: "News" },
   { name: "Meridian 24", group: "News" },
   { name: "Capital Report", group: "News" },
-  { name: "Atlas World", group: "News" },
-  { name: "Northwind Business", group: "News" },
-  { name: "Arena Sports 1", group: "Sports", favorite: true },
-  { name: "Arena Sports 2", group: "Sports" },
-  { name: "Arena Sports 3", group: "Sports" },
-  { name: "Arena Extra", group: "Sports" },
-  { name: "Velo TV", group: "Sports" },
-  { name: "Courtside", group: "Sports" },
-  { name: "Terra Documentary", group: "Docs", favorite: true },
+  { name: "Terra Documentary", group: "Docs" },
   { name: "Deep Blue", group: "Docs" },
   { name: "History Vault", group: "Docs" },
-  { name: "Wild Frontier", group: "Docs" },
   { name: "Cosmos HD", group: "Docs", noGuide: true },
-  { name: "Cinemax Gold", group: "Movies", favorite: true },
-  { name: "Cinemax Action", group: "Movies" },
+  { name: "Lantern Cinema", group: "Movies" },
   { name: "Reel Classics", group: "Movies" },
   { name: "Midnight Screen", group: "Movies" },
-  { name: "Indie Lane", group: "Movies" },
-  { name: "Spark Kids", group: "Kids", favorite: true },
+  { name: "Spark Kids", group: "Kids" },
   { name: "Little Owl", group: "Kids" },
-  { name: "Toon Harbor", group: "Kids" },
-  { name: "Spark Junior", group: "Kids" },
   { name: "Pulse Music", group: "Music" },
   { name: "Vinyl FM", group: "Music" },
-  { name: "Stage Live", group: "Music" },
-  { name: "Echo Hits", group: "Music" },
   { name: "Nordic One", group: "World" },
   { name: "Sol Latino", group: "World" },
   { name: "Kanal Euro", group: "World", noGuide: true, offline: true },
 ];
 
 export const SPORTS_BACKUP_CHANNELS: ChannelDef[] = [
-  { name: "Pitchside 1", group: "Sports" },
-  { name: "Pitchside 2", group: "Sports" },
-  { name: "Ringside", group: "Sports" },
-  { name: "Fairway Golf", group: "Sports" },
-  { name: "Rally TV", group: "Sports", noGuide: true },
+  { name: "Pitchside 1", group: FOOTBALL, pool: "Football" },
+  { name: "Pitchside 2", group: FOOTBALL, pool: "Football" },
+  { name: "Ringside 2", group: FIGHT, pool: "Fight" },
+  { name: "Fairway Golf", group: RACKET, pool: "Racket" },
+  { name: "Rally TV", group: MOTOR, pool: "Motor", noGuide: true },
   { name: "Northwind News HD", group: "News" },
   { name: "Harbor One HD", group: "News" },
 ];
@@ -75,18 +94,62 @@ interface Pool {
   titles: string[];
   minutes: number[];
   category: string;
+  /** fixtures are made up from these, so channels rarely show the same match */
+  fixtures?: { teams: string[]; sep: string; prefixes: string[]; share: number };
 }
 
 export const PROGRAMME_POOLS: Record<string, Pool> = {
+  Football: {
+    titles: ["Matchday Live", "Goals Tonight", "Full-time Reaction", "The Football Show"],
+    minutes: [90, 120, 120, 60],
+    category: "Football",
+    fixtures: {
+      teams: ["Harbor FC", "Kestrel United", "Ridgeway", "Pellmar Athletic", "Northport City", "Dunmore", "Castlebrook", "Wexley Town", "Saltmarsh Rovers", "Glenhaven", "Ashby", "Larkfield", "Brackwater", "Fenwick Albion", "Hollin Park", "Stavely"],
+      sep: " v ",
+      prefixes: ["", "", "", "", "", "", "Cup: ", "Women's League: "],
+      share: 0.75,
+    },
+  },
+  US: {
+    titles: ["Gridiron Tonight", "Hoops Highlights", "Puck Talk"],
+    minutes: [150, 180, 120],
+    category: "Sports",
+    fixtures: {
+      teams: ["Wolves", "Ironclads", "Harbor Kings", "Summit", "Bay Hawks", "Granite", "Coastal Gulls", "Red Rocks", "Prairie Storm", "Lakers of Ash", "Copper Miners", "Night Owls"],
+      sep: " vs ",
+      prefixes: ["", "Hoops: ", "Puck Drop: ", "College: "],
+      share: 0.75,
+    },
+  },
+  Motor: {
+    titles: ["Grand Prix of Valmont: Race", "Grand Prix of Valmont: Qualifying", "Rally of the Pines: Stage 6", "Endurance Hour", "Pit Lane Preview"],
+    minutes: [90, 120, 60],
+    category: "Motorsport",
+  },
+  Fight: {
+    titles: ["Fight Night: Okafor v Brandt", "Fight Night: Prelims", "Boxing: Reyes v Tamm", "Ringside Classics", "Weigh-in Live"],
+    minutes: [120, 180, 60],
+    category: "Boxing",
+  },
+  Racket: {
+    titles: ["Tennis: Quarter-final, Lind v Moreau", "Tennis: Doubles Semi-final", "Golf: Coastal Open, Final Round", "Golf: Coastal Open, Round 3", "Tennis Tonight"],
+    minutes: [120, 180, 90],
+    category: "Sports",
+  },
+  More: {
+    titles: ["Cycling: Stage 14", "Pro Darts: Final", "Snooker: Masters Semi-final", "Rugby: Harbour v Westmoor", "Cricket: Day 3"],
+    minutes: [120, 180, 90],
+    category: "Sports",
+  },
+  PPV: {
+    titles: ["Main Event: Okafor v Brandt", "Undercard: Vale v Ito", "Event build-up", "Main Event: Castillo v Grant"],
+    minutes: [180, 120],
+    category: "Sports",
+  },
   News: {
     titles: ["Morning Brief", "Midday Report", "Evening Brief", "Weather Desk", "Late Edition", "World Tonight", "Business Hour", "The Briefing", "Harbor Strike: Special Report"],
     minutes: [30, 30, 60],
     category: "News",
-  },
-  Sports: {
-    titles: ["Harbor FC v Kestrel", "Pro Darts: Final", "Rally Highlights", "Goals Tonight", "Full-time Reaction", "Night Fight", "Tennis: Quarter-final", "Cycling: Stage 14", "Ridge v Pellmar", "Matchday Live", "Harbor FC: Post-match"],
-    minutes: [60, 90, 120],
-    category: "Sports",
   },
   Docs: {
     titles: ["Rivers of Ice", "Deep Hours", "Night Sky Live", "The Salt Road", "Wild Coasts", "Engines of Empire", "Cities Below", "Ocean Giants"],
@@ -134,11 +197,18 @@ export const DESCRIPTIONS = [
 
 /** Programmes pinned around "now" so the demo always shows something recognisable. */
 export const FEATURED: Record<string, { title: string; startOffsetMin: number; minutes: number; description: string }> = {
-  "Arena Sports 1": { title: "Harbor FC v Kestrel", startOffsetMin: -67, minutes: 115, description: "League · second half. Kestrel pushing for an equaliser." },
+  "Arena Sports 1": { title: "Harbor FC v Kestrel United", startOffsetMin: -67, minutes: 115, description: "League · second half. Kestrel pushing for an equaliser." },
+  "Gridiron Network": { title: "Wolves vs Ironclads", startOffsetMin: -48, minutes: 190, description: "Second quarter from the Ironworks." },
+  "Arena Sports 2": { title: "Ridgeway v Pellmar Athletic", startOffsetMin: -22, minutes: 115, description: "League · first half." },
+  "Oche Darts": { title: "Pro Darts: Final", startOffsetMin: -10, minutes: 90, description: "The final, live." },
+  "Pitch One": { title: "Northport City v Dunmore", startOffsetMin: 35, minutes: 115, description: "League · live from the Northport Stadium." },
+  "Apex Motorsport": { title: "Grand Prix of Valmont: Qualifying", startOffsetMin: 80, minutes: 75, description: "Qualifying, live from Valmont." },
+  "PPV Event 1": { title: "Main Event: Okafor v Brandt", startOffsetMin: 130, minutes: 180, description: "Heavyweight title, twelve rounds." },
+  "Hoops 24": { title: "Hoops: Harbor Kings vs Summit", startOffsetMin: 185, minutes: 150, description: "Regular season." },
+  "Baseline TV": { title: "Tennis: Quarter-final, Lind v Moreau", startOffsetMin: -35, minutes: 150, description: "Second set." },
   "Northwind News": { title: "Evening Brief", startOffsetMin: -24, minutes: 60, description: "The day's headlines, with analysis from correspondents across the region." },
   "Terra Documentary": { title: "Rivers of Ice", startOffsetMin: -24, minutes: 55, description: "Glaciers carved the north. A crew follows the melt season." },
-  "Cinemax Gold": { title: "The Long Field", startOffsetMin: -74, minutes: 115, description: "A farmer and his estranged son rebuild after a flood." },
-  "Arena Sports 2": { title: "Pro Darts: Final", startOffsetMin: -10, minutes: 90, description: "The final, live." },
+  "Lantern Cinema": { title: "The Long Field", startOffsetMin: -74, minutes: 115, description: "A farmer and his estranged son rebuild after a flood." },
   "Spark Kids": { title: "Moon Patrol", startOffsetMin: -9, minutes: 25, description: "A crew of young astronauts keeps the moon base tidy." },
 };
 

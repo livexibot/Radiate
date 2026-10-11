@@ -4,6 +4,7 @@ import { Rail } from "./components/Rail";
 import { Toasts } from "./components/Toasts";
 import { Guide } from "./screens/Guide";
 import { Home } from "./screens/Home";
+import { Library } from "./screens/Library";
 import { Live } from "./screens/Live";
 import { MovieDetail } from "./screens/MovieDetail";
 import { Multiview } from "./screens/Multiview";
@@ -12,7 +13,6 @@ import { Player } from "./screens/Player";
 import { Search } from "./screens/Search";
 import { SeriesDetail } from "./screens/SeriesDetail";
 import { Settings } from "./screens/Settings";
-import { VodGrid } from "./screens/VodGrid";
 import { useApp, type Route } from "./state/app";
 import { useSpatialNav } from "./state/useSpatialNav";
 
@@ -43,8 +43,9 @@ export function App() {
         g: { name: "guide" },
         l: { name: "live" },
         h: { name: "home" },
-        m: { name: "movies" },
-        s: { name: "series" },
+        b: { name: "library" },
+        m: { name: "library", tab: "movie" },
+        s: { name: "library", tab: "series" },
         "/": { name: "search" },
       };
       const r = map[e.key.toLowerCase()];
@@ -83,7 +84,7 @@ export function App() {
       screen = <Live route={route} />;
       break;
     case "guide":
-      screen = <Guide />;
+      screen = <Guide key={route.chip ?? ""} initialChip={route.chip} />;
       break;
     case "player":
       screen = <Player route={route} />;
@@ -91,11 +92,14 @@ export function App() {
     case "multiview":
       screen = <Multiview route={route} />;
       break;
+    case "library":
+      screen = <Library tab={route.tab ?? "movie"} />;
+      break;
     case "movies":
-      screen = <VodGrid kind="movie" />;
+      screen = <Library tab="movie" />;
       break;
     case "series":
-      screen = <VodGrid kind="series" />;
+      screen = <Library tab="series" />;
       break;
     case "movie":
       screen = <MovieDetail id={route.id} />;

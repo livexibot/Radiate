@@ -57,6 +57,8 @@ export function StreamView({ target, backdrop, muted, compact, className = "", c
           stream={state.stream}
           volume={prefs?.volume ?? 0.8}
           muted={muted ?? prefs?.muted ?? false}
+          live={target?.type === "channel"}
+          latency={prefs?.latency}
           onFatal={(f) => (f.decode ? setFatal(f) : fail(f.message))}
         />
       ) : null}

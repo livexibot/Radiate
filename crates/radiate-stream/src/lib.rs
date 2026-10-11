@@ -23,6 +23,7 @@
 //! response it opened and hands it to the player's first read, so probing
 //! never costs a second connection.
 
+pub mod embed;
 mod failure;
 mod hls;
 mod relay;
@@ -260,6 +261,11 @@ impl StreamHub {
     /// The address the relay listens on.
     pub fn local_addr(&self) -> SocketAddr {
         self.inner.addr
+    }
+
+    /// The local page that holds YouTube's player for the reactor overlay.
+    pub fn embed_url(&self, target: &embed::EmbedTarget) -> String {
+        format!("http://{}/yt?{}", self.inner.addr, target.query())
     }
 
     /// Open a session. Refuses when the source's limit is reached; never queues.

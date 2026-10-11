@@ -10,9 +10,10 @@ export interface ZapContext {
 export type Route =
   | { name: "home" }
   | { name: "live"; groupId?: string | null; favorites?: boolean; channelId?: string }
-  | { name: "guide" }
+  | { name: "guide"; chip?: string }
   | { name: "player"; target: PlayTarget; ctx?: ZapContext; resume?: number; title?: string }
   | { name: "multiview"; channelId: string; ctx?: ZapContext }
+  | { name: "library"; tab?: LibraryTab }
   | { name: "movies" }
   | { name: "movie"; id: string }
   | { name: "series" }
@@ -21,7 +22,9 @@ export type Route =
   | { name: "settings"; section?: SettingsSection }
   | { name: "onboarding" };
 
-export type SettingsSection = "sources" | "channels" | "playback" | "backup" | "about";
+export type LibraryTab = "movie" | "series";
+
+export type SettingsSection = "sources" | "channels" | "playback" | "reactors" | "backup" | "about";
 
 export interface Toast {
   id: number;
@@ -67,8 +70,9 @@ function initialRoute(): Route | null {
     home: { name: "home" },
     live: { name: "live" },
     guide: { name: "guide" },
-    movies: { name: "movies" },
-    series: { name: "series" },
+    library: { name: "library" },
+    movies: { name: "library", tab: "movie" },
+    series: { name: "library", tab: "series" },
     search: { name: "search" },
     settings: { name: "settings" },
     onboarding: { name: "onboarding" },
@@ -100,7 +104,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const top = s[s.length - 1];
       if (top && JSON.stringify(top) === JSON.stringify(r)) return s;
       // rail destinations reset the stack so Back never walks through unrelated screens
-      const railRoot = ["home", "live", "guide", "movies", "series", "search", "settings"].includes(r.name);
+      const railRoot = ["home", "live", "guide", "library", "movies", "series", "search", "settings"].includes(r.name);
       const next = railRoot ? [r] : [...s, r];
       return next.slice(-30);
     });

@@ -1,17 +1,17 @@
 import { useApp, type Route } from "../state/app";
 import { Icon, type IconName } from "./Icon";
+import { UpdatePill } from "../updater";
 
 const ITEMS: { route: Route["name"]; icon: IconName; label: string; key: string }[] = [
   { route: "home", icon: "home", label: "Home", key: "H" },
   { route: "live", icon: "live", label: "Live TV", key: "L" },
   { route: "guide", icon: "guide", label: "Guide", key: "G" },
-  { route: "movies", icon: "film", label: "Movies", key: "M" },
-  { route: "series", icon: "series", label: "Series", key: "S" },
   { route: "search", icon: "search", label: "Search", key: "/" },
+  { route: "library", icon: "film", label: "Library", key: "B" },
   { route: "settings", icon: "gear", label: "Settings", key: "Ctrl+," },
 ];
 
-const OWNER: Partial<Record<Route["name"], Route["name"]>> = { movie: "movies", seriesDetail: "series" };
+const OWNER: Partial<Record<Route["name"], Route["name"]>> = { movies: "library", series: "library", movie: "library", seriesDetail: "library" };
 
 export function Rail() {
   const { route, navigate } = useApp();
@@ -33,6 +33,9 @@ export function Rail() {
           <span className="rail-tip">{it.label}</span>
         </button>
       ))}
+      <div className="rail-end">
+        <UpdatePill />
+      </div>
     </nav>
   );
 }

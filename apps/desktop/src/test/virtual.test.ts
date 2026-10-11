@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampIndex, computeWindow, pagesFor, scrollToReveal } from "../lib/virtual";
+import { clampIndex, computeWindow, pagesFor, scrollToReveal, segmentsFor } from "../lib/virtual";
 
 describe("computeWindow", () => {
   it("renders only the visible rows plus overscan", () => {
@@ -35,5 +35,21 @@ describe("paging and reveal", () => {
   it("clamps indexes", () => {
     expect(clampIndex(-3, 10)).toBe(0);
     expect(clampIndex(30, 10)).toBe(9);
+  });
+});
+
+describe("segmentsFor", () => {
+  it("splits a page across lists laid end to end", () => {
+    expect(segmentsFor([30, 50, 40], 0, 100)).toEqual([
+      { part: 0, offset: 0, limit: 30 },
+      { part: 1, offset: 0, limit: 50 },
+      { part: 2, offset: 0, limit: 20 },
+    ]);
+    expect(segmentsFor([30, 50, 40], 100, 200)).toEqual([{ part: 2, offset: 20, limit: 20 }]);
+  });
+  it("skips empty lists and ranges past the end", () => {
+    expect(segmentsFor([0, 10], 0, 5)).toEqual([{ part: 1, offset: 0, limit: 5 }]);
+    expect(segmentsFor([10], 20, 30)).toEqual([]);
+    expect(segmentsFor([], 0, 10)).toEqual([]);
   });
 });

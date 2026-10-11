@@ -17,6 +17,19 @@ page.
 - Never help get around a provider's connection limit. Multiview opens one
   relay session per tile and the relay refuses past the limit.
 
+## Decisions (owner, 11 October 2026)
+
+- Version 0.2 is for watching sports: live TV comes first (Home, Live and
+  the guide lead with sports), and movies and series move into one
+  Library entry. VOD still has to work properly.
+- Installers on every release, and the app updates itself.
+- Reactors: a YouTube channel or video saved by link, shown in a box over
+  the match (left by default). It is YouTube's official embedded player,
+  loaded from a small page on the relay (`/yt`); Radiate never downloads,
+  records or relays YouTube's video. YouTube is contacted only when the
+  user adds or shows a reactor. "Delay match" holds live TV back up to
+  60 s so a reactor who is behind the feed lines up.
+
 ## Layout
 
 ```
@@ -24,6 +37,7 @@ crates/radiate-core     playlists (M3U), Xtream, XMLTV, SQLite index, guide matc
 crates/radiate-stream   127.0.0.1 relay: HLS rewriting, Range, connection limit, plain-language failures
 apps/desktop/src-tauri  Tauri shell: commands, events, keyring, mpv, background guide refresh
 apps/desktop/src        React + TypeScript UI; src/api has a mock backend for the browser
+                        (src/reactor: the YouTube reactor box; src/updater: updates)
 docs/contract.md        the agreement between those four; change it first
 fixtures/               invented playlists, guides and Xtream replies for tests
 ```
@@ -38,13 +52,26 @@ fixtures/               invented playlists, guides and Xtream replies for tests
 - The real app can be driven end to end on Linux with `tauri-driver` and
   `WebKitWebDriver` under Xvfb; test streams can be made with ffmpeg
   (HLS files, and a real-time MPEG-TS with `-re ... -listen 1`).
+  `scripts/e2e/` has all of it: a fake Xtream provider with live, movies
+  and series, the media generator, and a driver with checks (see its
+  README).
 - Releases: conventional commits; release-please opens the release pull
   request, and merging it builds and attaches the installers.
+- Updates: the app checks `releases/latest/download/latest.json` 10 s
+  after launch and every 6 hours, downloads in the background and
+  restarts only when asked. Releases are signed with the updater key in
+  the `TAURI_SIGNING_PRIVATE_KEY` Actions secret (its public half is in
+  `tauri.conf.json`); the release workflow stops if the secret is
+  missing. Draft releases are invisible to the updater. Pull request
+  builds skip the signed update files.
 
 ## Known gaps after the first release
 
 - Not tried yet against a real provider, on Windows or macOS, or with mpv.
 - Catch-up, reminders, recording, Stalker portals, QR onboarding, profiles
   and sync are later releases .
-- No call to fetch one movie; the movie page searches the VOD list for it.
 - Guides download in full on every refresh (no ETag).
+- Reactors have not been tried against the real YouTube player (it is
+  unreachable from the build machine): the page, the box, the menu and
+  the hold are tested, the player's own events and volume commands are
+  not. A reactor ahead of the feed can't be held back, only the match.

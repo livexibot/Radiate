@@ -21,7 +21,11 @@ Errors cross to the UI as `{ code: string, message: string, ...extra }`.
   unfiltered; use a per-country file the user picks, e.g.
   `https://iptv-org.github.io/iptv/countries/uk.m3u`).
 - No telemetry, no analytics, no network calls except to the user's own
-  sources, guides, and the public catalog when chosen.
+  sources, guides, and the public catalog when chosen, and YouTube for the
+  reactors the user adds (looking up a link, checking whether a channel is
+  live, and YouTube's own embedded player).
+- Reactors are YouTube's official embedded player only. Radiate never
+  downloads, records or relays YouTube's video.
 - Multiview and every other playback respect each provider's connection
   limit. Never open more upstream connections to a source than its limit,
   never reuse one connection for two viewers to dodge the limit, never
@@ -85,7 +89,10 @@ pub struct Programme { channel_id: String, start: i64, stop: i64, title: String,
 pub struct NowNext { now: Option<Programme>, next: Option<Programme> }
 
 pub struct VodItem { id, source_id, kind: ContentKind, name, poster: Option<String>, group_id, group_name,
-                     year: Option<u32>, rating: Option<f32>, plot: Option<String>, progress: Option<f32> }
+                     year: Option<u32>, rating: Option<f32>, plot: Option<String>, progress: Option<f32>,
+                     // only on an episode (continue watching, vod_get of an episode id); left out otherwise:
+                     series_id: Option<String>, episode_id: Option<String>, season: Option<u32>, episode: Option<u32>,
+                     episode_title: Option<String> }
 pub struct SeriesInfo { id, name, poster, plot, year, rating, seasons: Vec<Season> }
 pub struct Season { number: u32, episodes: Vec<Episode> }
 pub struct Episode { id, season: u32, episode: u32, title, plot, still: Option<String>, duration_secs: Option<u32>, progress: Option<f32> }
@@ -110,7 +117,14 @@ pub struct Prefs {                     // free-form but typed where the UI depen
     onboarded: bool,
     favorites_order: Vec<String>,
     epg_refresh_hours: u32,         // default 12
+    latency: Latency,               // "low" | "normal" | "stable", default "normal": how close live playback stays to the edge
+    live_format: LiveFormat,        // "auto" | "ts" | "hls", default "auto": live format asked of Xtream providers
+    #[serde(flatten)] extra: Map<String, Value>, // any other field the UI stores comes back unchanged
 }
+// Fields the UI keeps in `extra`:
+//   sportsGroups: { include: string[], exclude: string[] }   group ids marked as sports, or not, against the name rules
+//   reactors: { id, name, url, kind: "video" | "channel", videoId, channelId }[]   saved YouTube reactors
+//   reactorOverlay: { size: "s" | "m" | "l", side: "left" | "right", volume: 0..100, delay: 0..60 }
 pub struct EpgCandidate { epg_channel_id: String, display_name: String, icon: Option<String>, score: f32 }
 pub struct Progress { source_id: String, phase: String, done: u32, total: Option<u32> }  // phase: "playlist" | "guide" | "vod" | "matching" | "done"
 ```
@@ -144,12 +158,16 @@ impl Core {
   pub fn unmatched_channels(&self, source_id: Option<&str>) -> Result<Vec<Channel>>;
   // vod
   pub fn vod(&self, q: &VodQuery) -> Result<Page<VodItem>>;
+  pub fn vod_get(&self, id: &str) -> Result<VodItem>;   // a movie, a series, or an episode (shaped like continue watching)
   pub async fn series_info(&self, series_id: &str) -> Result<SeriesInfo>;   // xtream get_series_info, cached
   pub fn set_progress(&self, item_id: &str, position_secs: f64, duration_secs: f64) -> Result<()>;
   pub fn continue_watching(&self, limit: u32) -> Result<Vec<VodItem>>;
+      // unfinished movies; per series one entry: the episode watched last, or the next one when that was finished
+      // (an episode entry: kind "series", id = episode id, name = series name, episode fields set)
   // search, playback, prefs, backup
   pub fn search(&self, query: &str, limit_per_kind: u32) -> Result<SearchResults>;
-  pub fn resolve(&self, t: &PlayTarget) -> Result<ResolvedStream>;
+  pub fn resolve(&self, t: &PlayTarget) -> Result<ResolvedStream>;   // Xtream live: prefs.live_format ("ts" / "hls") when the
+                                                                    // account's allowed_output_formats permit it; "auto" = HLS if offered, else TS
   pub async fn xtream_active_connections(&self, source_id: &str) -> Result<Option<u32>>; // re-reads user_info.active_cons
   pub fn prefs(&self) -> Result<Prefs>;
   pub fn set_prefs(&self, p: serde_json::Value) -> Result<Prefs>;  // shallow merge of the given fields
@@ -186,6 +204,7 @@ impl StreamHub {
   pub fn sessions(&self) -> Vec<SessionInfo>;
   pub fn usage(&self) -> Vec<ConnectionUsage>;            // per source
   pub fn subscribe(&self) -> broadcast::Receiver<StreamEvent>; // health and failures
+  pub fn embed_url(&self, target: &embed::EmbedTarget) -> String; // reactor page, see below
 }
 pub struct OpenRequest { source_id, upstream_url, headers: Vec<(String, String)>, kind_hint: StreamKind, limit: Option<u32>, external_in_use: Option<u32>, title: String }
 pub struct StreamSession { id, local_url: String, kind: StreamKind }   // kind is sniffed from content-type / first bytes when the hint is Unknown
@@ -210,6 +229,17 @@ Rules:
   Your account may have expired or reached its connection limit.", 404
   "This channel is offline at the provider.", 5xx "The provider's server
   is having trouble.", timeouts "The provider isn't answering."
+
+Reactor page: `GET /yt?v=<video id>` or `GET /yt?channel=<UC… channel id>`
+serves a small page holding YouTube's embedded player (`embed/<id>` or
+`embed/live_stream?channel=<id>`, `enablejsapi=1`, muted autoplay). It is
+served from the relay's own `http://127.0.0.1:<port>` origin so YouTube gets
+a normal web referrer on every platform. Ids are checked strictly (11 or 24
+characters of `[A-Za-z0-9_-]`), other hosts are refused like the stream
+routes, and the page has its own CSP (`frame-src https://www.youtube.com`).
+The page relays `{ radiate: "cmd", func, args }` from the app window to the
+player as YouTube's `{ event: "command" }` messages and passes the player's
+messages back up as `{ radiate: "yt", data }`.
 
 ## 3. Tauri commands (what the UI calls)
 
@@ -238,6 +268,7 @@ Rules:
 | `epg_set_match` | `{ channelId, epgChannelId }` | |
 | `epg_unmatched` | `{ sourceId? }` | `Channel[]` |
 | `vod_list` | `{ query: VodQuery }` | `Page<VodItem>` |
+| `vod_get` | `{ id }` | `VodItem` (movie, series or episode id) |
 | `series_info` | `{ id }` | `SeriesInfo` |
 | `progress_set` | `{ itemId, positionSecs, durationSecs }` | |
 | `continue_watching` | `{ limit }` | `VodItem[]` |
@@ -252,6 +283,9 @@ Rules:
 | `mpv_available` | | `boolean` |
 | `mpv_open` | `{ target: PlayTarget }` | `{ sessionId }` — mpv reads from the relay, so it counts against the limit too |
 | `app_info` | | `{ version, dataDir }` |
+| `youtube_resolve` | `{ url }` | `{ kind: "video" \| "channel", videoId, channelId, title }` (handles like `@name` are looked up on youtube.com) |
+| `youtube_live_now` | `{ channelId }` | `string \| null`, the video the channel is streaming live now |
+| `reactor_embed_url` | `{ videoId?, channelId? }` | the relay's `/yt` page address |
 
 Events (`listen`): `source-progress` (Progress), `source-updated` (Source),
 `stream-health` / `stream-failed` / `stream-closed` (StreamEvent payloads,

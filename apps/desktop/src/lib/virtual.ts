@@ -47,3 +47,25 @@ export function clampIndex(i: number, count: number): number {
   if (count <= 0) return 0;
   return Math.max(0, Math.min(count - 1, i));
 }
+
+export interface Segment {
+  /** which list */
+  part: number;
+  offset: number;
+  limit: number;
+}
+
+/** Map rows [start, end) of several lists laid end to end onto per-list offset/limit requests. */
+export function segmentsFor(totals: number[], start: number, end: number): Segment[] {
+  const out: Segment[] = [];
+  let base = 0;
+  for (let part = 0; part < totals.length; part++) {
+    const t = Math.max(0, totals[part] ?? 0);
+    const from = Math.max(start, base);
+    const to = Math.min(end, base + t);
+    if (to > from) out.push({ part, offset: from - base, limit: to - from });
+    base += t;
+    if (base >= end) break;
+  }
+  return out;
+}
