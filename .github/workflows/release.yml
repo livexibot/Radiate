@@ -1,11 +1,22 @@
 # Builds the installers for Windows, macOS and Linux and attaches them to
-# a release. release-please.yml calls it when a release is created; pushing
-# a v* tag by hand makes a draft release instead.
+# a release. release-please.yml calls it when a release is created. Running
+# it by hand (Actions, Release, Run workflow) or pushing a v* tag makes the
+# release itself.
 name: Release
 
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Version tag to create, like v0.1.0
+        type: string
+        required: true
+      draft:
+        description: Keep the release as a draft
+        type: boolean
+        default: true
   workflow_call:
     inputs:
       tag:
@@ -34,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || inputs.tag || github.ref }}
       - name: Install Tauri's system libraries
         if: startsWith(matrix.platform, 'ubuntu')
         run: |
