@@ -1,0 +1,26 @@
+[package]
+name = "radiate-core"
+description = "Sources, parsers, SQLite index, guide and prefs for Radiate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "fs", "io-util", "sync"] }
+tokio-util = { version = "0.7", features = ["io", "io-util"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "stream", "json"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+quick-xml = { version = "0.42", features = ["encoding"] }
+flate2 = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+futures = "0.3"
+strsim = "0.11"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }

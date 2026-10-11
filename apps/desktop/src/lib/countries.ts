@@ -1,0 +1,33 @@
+/** Countries offered for the free public catalog (iptv-org per-country playlists). */
+export const COUNTRIES: { code: string; name: string }[] = [
+  { code: "ar", name: "Argentina" },
+  { code: "au", name: "Australia" },
+  { code: "at", name: "Austria" },
+  { code: "be", name: "Belgium" },
+  { code: "br", name: "Brazil" },
+  { code: "ca", name: "Canada" },
+  { code: "cl", name: "Chile" },
+  { code: "dk", name: "Denmark" },
+  { code: "fi", name: "Finland" },
+  { code: "fr", name: "France" },
+  { code: "de", name: "Germany" },
+  { code: "gr", name: "Greece" },
+  { code: "in", name: "India" },
+  { code: "ie", name: "Ireland" },
+  { code: "it", name: "Italy" },
+  { code: "jp", name: "Japan" },
+  { code: "mx", name: "Mexico" },
+  { code: "nl", name: "Netherlands" },
+  { code: "nz", name: "New Zealand" },
+  { code: "no", name: "Norway" },
+  { code: "pl", name: "Poland" },
+  { code: "pt", name: "Portugal" },
+  { code: "es", name: "Spain" },
+  { code: "se", name: "Sweden" },
+  { code: "ch", name: "Switzerland" },
+  { code: "tr", name: "Turkey" },
+  { code: "uk", name: "United Kingdom" },
+  { code: "us", name: "United States" },
+];
+
+export const publicCatalogUrl = (code: string) => `https://iptv-org.github.io/iptv/countries/${code}.m3u`;

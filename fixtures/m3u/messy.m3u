@@ -1,0 +1,35 @@
+﻿#EXTM3U x-tvg-url="http://guide.example.invalid/guide.xml, http://guide.example.invalid/extra.xml.gz" url-tvg="http://guide.example.invalid/guide.xml"
+# Invented channels for tests. Not real streams.
+
+#EXTINF:-1 tvg-id="NorthwindNews.uk" tvg-name="Northwind News" tvg-logo="http://img.example.invalid/northwind.png" group-title="News" tvg-chno="101",Northwind News HD
+#EXTVLCOPT:http-user-agent=RadiateFixture/1.0
+#EXTVLCOPT:http-referrer=http://portal.example.invalid/
+#EXTVLCOPT:http-origin=http://portal.example.invalid
+#KODIPROP:inputstream.adaptive.manifest_type=hls
+http://streams.example.invalid/live/northwind.m3u8
+#EXTINF:-1 tvg-id='ArenaSports1.uk' tvg-logo=http://img.example.invalid/arena1.png group-title="Sports, Live" catchup="default" catchup-days="3" catchup-source="?utc={utc}",UK: Arena Sports 1 FHD
+http://streams.example.invalid/live/arena1.ts
+#EXTINF:-1 tvg-id="" group-title="Sports, Live",|UK| Arena Sports 2
+http://streams.example.invalid/live/arena2.ts
+#EXTINF:-1 group-title="Documentary",Terra Documentary Chanel
+http://streams.example.invalid/live/terra.m3u8
+#EXTINF:0 tvg-name="Spark Kids",
+#EXTGRP:Kids
+http://streams.example.invalid/live/spark.m3u8
+#EXTINF:-1 tvg-id="HarborOne.uk" group-title="Local" tvg-chno="5",Harbor One
+http://streams.example.invalid/live/harbor1.m3u8
+#EXTINF:-1 group-title="Local",Harbor One +1
+http://streams.example.invalid/live/harbor1plus.m3u8
+#EXTINF:-1 tvg-id="HarborOne.uk" group-title="Local" tvg-chno="5",Harbor One
+http://streams.example.invalid/live/harbor1.m3u8
+
+#EXTINF:-1,
+http://streams.example.invalid/live/mystery-feed.ts
+#EXTINF:-1 tvg-logo="http://img.example.invalid/gold.png" group-title="Films",Cinemax Gold: The Long Night (2019)
+http://streams.example.invalid/movie/demo/demo/9001.mkv
+#EXTINF:-1 tvg-logo="http://img.example.invalid/tales.png" group-title="Shows",Harbor Tales S01E01
+http://streams.example.invalid/series/demo/demo/7001.mp4
+#EXTINF:-1 group-title="Shows",Harbor Tales S01E02
+http://streams.example.invalid/series/demo/demo/7002.mp4
+#EXTINF:-1 group-title="Local",Windows Line Ending
+http://streams.example.invalid/live/crlf.ts

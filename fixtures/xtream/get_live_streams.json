@@ -1,0 +1,11 @@
+[
+  {"num": 1, "name": "Northwind News", "stream_type": "live", "stream_id": 101, "stream_icon": "http://img.example.invalid/northwind.png",
+   "epg_channel_id": "NorthwindNews.uk", "added": "1700000000", "category_id": "1", "tv_archive": 0, "tv_archive_duration": 0},
+  {"num": "2", "name": "Arena Sports 1", "stream_type": "live", "stream_id": "102", "stream_icon": "",
+   "epg_channel_id": null, "category_id": 2, "tv_archive": "1", "tv_archive_duration": "5"},
+  {"num": null, "name": "Arena Sports 2", "stream_id": 103.0, "epg_channel_id": "", "category_ids": [2]},
+  {"num": "", "name": "Spark Kids", "stream_id": "104", "category_id": "99"},
+  {"name": "Broken entry without id", "stream_id": null},
+  {"num": 7, "name": null, "stream_id": "105", "category_id": "3"},
+  "not an object"
+]

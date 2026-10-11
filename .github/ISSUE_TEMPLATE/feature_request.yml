@@ -1,0 +1,22 @@
+name: An idea
+description: Something Radiate could do, or do better.
+labels: [idea]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it matters to you
+      description: What you are trying to do and what gets in the way today.
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Ground rules
+      options:
+        - label: It doesn't ship channels or playlists, or work around a provider's connection limit or copy protection
+          required: true

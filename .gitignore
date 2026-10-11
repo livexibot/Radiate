@@ -1,0 +1,11 @@
+target/
+node_modules/
+dist/
+apps/desktop/src-tauri/gen/
+*.log
+.env
+.DS_Store
+# Never commit keys or tokens
+*.pfx
+*.p12
+*.key

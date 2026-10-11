@@ -1,0 +1,51 @@
+name: Something is wrong
+description: Radiate does something it shouldn't, or doesn't do something it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: And what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      placeholder: |
+        1. Open ...
+        2. Click ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Radiate version
+      description: Settings, About.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: System
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: Source type
+      options:
+        - M3U playlist
+        - Xtream account
+        - Free public catalog
+        - Not about a source
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots or error messages. Never paste playlist links, server addresses, usernames or passwords.

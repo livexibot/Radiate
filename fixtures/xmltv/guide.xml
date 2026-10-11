@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
+<!-- Invented guide for tests. Tests move 20261010 to today and 20261011 to tomorrow (UTC). -->
+<tv generator-info-name="radiate-fixture">
+  <channel id="NorthwindNews.uk">
+    <display-name lang="en">Northwind News</display-name>
+    <icon src="http://img.example.invalid/northwind.png"/>
+  </channel>
+  <channel id="ArenaSports1.uk">
+    <display-name>Arena Sports 1</display-name>
+  </channel>
+  <channel id="ArenaSports2.uk">
+    <display-name>Arena Sports 2</display-name>
+  </channel>
+  <channel id="TerraDoc.de">
+    <display-name>Terra Documentary Channel</display-name>
+    <display-name>Terra Doc</display-name>
+  </channel>
+  <channel id="HarborOne.uk">
+    <display-name>Harbor One</display-name>
+  </channel>
+  <channel id="SparkKids.uk">
+    <display-name>Spark Kids</display-name>
+  </channel>
+
+  <programme start="20261010000000 +0000" stop="20261010060000 +0000" channel="NorthwindNews.uk">
+    <title lang="en">Night Desk</title>
+    <desc>Overnight headlines &amp; weather.</desc>
+    <category>News</category>
+  </programme>
+  <programme start="20261010060000 +0000" stop="20261010120000 +0000" channel="NorthwindNews.uk">
+    <title>Morning Briefing</title>
+  </programme>
+  <programme start="20261010120000 +0000" stop="20261010180000 +0000" channel="NorthwindNews.uk">
+    <title>Northwind Today</title>
+  </programme>
+  <programme start="20261010180000 +0000" stop="20261011000000 +0000" channel="NorthwindNews.uk">
+    <title>Evening Report</title>
+  </programme>
+  <programme start="20261011000000 +0000" stop="20261011060000 +0000" channel="NorthwindNews.uk">
+    <title>Night Desk</title>
+  </programme>
+  <programme start="20261010000000 +0000" stop="20261010120000 +0000" channel="ArenaSports1.uk">
+    <title>Lighthouse Cup Replay</title>
+    <category>Sports</category>
+  </programme>
+  <programme start="20261010120000 +0000" stop="20261011000000 +0000" channel="ArenaSports1.uk">
+    <title>Lighthouse Cup Live</title>
+    <category>Sports</category>
+  </programme>
+  <programme start="20261011000000 +0000" stop="20261011020000 +0000" channel="ArenaSports1.uk">
+    <title>Lighthouse Cup Highlights</title>
+  </programme>
+  <programme start="20261010000000 +0000" stop="20261011000000 +0000" channel="ArenaSports2.uk">
+    <title>Racing Weekend</title>
+  </programme>
+  <programme start="20261010000000 +0000" stop="20261011000000 +0000" channel="TerraDoc.de">
+    <title>Deep Oceans</title>
+  </programme>
+  <programme start="20261010000000 +0000" stop="20261011000000 +0000" channel="HarborOne.uk">
+    <title>Harbor Life</title>
+  </programme>
+  <programme start="20261010000000" channel="SparkKids.uk">
+    <title>Cartoon Morning</title>
+  </programme>
+  <programme start="20200101000000 +0000" stop="20200101010000 +0000" channel="SparkKids.uk">
+    <title>Long Gone</title>
+  </programme>
+</tv>

@@ -1,0 +1,15 @@
+{
+  "seasons": [],
+  "info": {"name": "Harbor Tales", "cover": "http://img.example.invalid/tales.png", "plot": "Life by the docks, in full.", "releaseDate": "2021-04-01", "rating": "8.1"},
+  "episodes": {
+    "1": [
+      {"id": "70011", "episode_num": "1", "title": "Harbor Tales - S01E01 - Arrival", "container_extension": "mp4",
+       "info": {"duration_secs": "2700", "plot": "A ship comes in.", "movie_image": "http://img.example.invalid/e1.jpg"}, "season": "1"},
+      {"id": 70012, "episode_num": 2, "title": "Harbor Tales - S01E02 - Storm", "container_extension": "mkv",
+       "info": {"duration": "00:44:30"}, "season": 1}
+    ],
+    "2": [
+      {"id": "70021", "episode_num": "1", "title": "Harbor Tales - S02E01 - Return", "container_extension": "mp4", "info": []}
+    ]
+  }
+}

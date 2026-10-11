@@ -1,0 +1,5 @@
+[
+  {"num": 1, "name": "Harbor Tales", "series_id": "7001", "cover": "http://img.example.invalid/tales.png", "plot": "Life by the docks.",
+   "releaseDate": "2021-04-01", "rating": "8", "category_id": "20"},
+  {"num": 2, "name": "Spark Adventures", "series_id": 7002, "cover": null, "plot": "", "release_date": null, "rating": 0, "category_id": null}
+]
