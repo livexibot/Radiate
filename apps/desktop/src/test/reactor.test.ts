@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readMessage } from "../reactor/bridge";
 import { MatchDelay, type DelayVideo } from "../reactor/delay";
-import { fallbackName, overlayPrefs, parseYouTubeLink, playerErrorText, sanitizeReactors } from "../reactor/link";
+import { BOX_MAX, BOX_MIN_PX, boxPrefs, boxRect, MATCH_OVERLAP, moveBox, placeMatch, resizeBox, type Rect } from "../reactor/box";
+import { canOpenOnYouTube, fallbackName, overlayPrefs, parseYouTubeLink, playerErrorText, sanitizeReactors } from "../reactor/link";
 
 describe("YouTube links", () => {
   it("reads video links", () => {
@@ -44,15 +45,22 @@ describe("YouTube links", () => {
     expect(playerErrorText(150)).toMatch(/doesn't allow/);
     expect(playerErrorText(153)).toMatch(/refused/);
     expect(playerErrorText(999)).toBe("YouTube's player stopped.");
+    expect(canOpenOnYouTube(150)).toBe(true);
+    expect(canOpenOnYouTube(101)).toBe(true);
+    expect(canOpenOnYouTube(100)).toBe(false);
+    expect(canOpenOnYouTube(2)).toBe(false);
   });
 });
 
 describe("reactor prefs", () => {
   it("fills and clamps overlay settings", () => {
-    expect(overlayPrefs(undefined)).toEqual({ size: "m", side: "left", volume: 80, delay: 0 });
-    expect(overlayPrefs({ size: "xl" as never, side: "top" as never, volume: 140, delay: -3 })).toEqual({ size: "m", side: "left", volume: 100, delay: 0 });
-    expect(overlayPrefs({ size: "l", side: "right", volume: 0, delay: 600 })).toEqual({ size: "l", side: "right", volume: 0, delay: 60 });
+    expect(overlayPrefs(undefined)).toEqual({ size: "m", side: "left", volume: 80, delay: 0, box: null });
+    expect(overlayPrefs({ size: "xl" as never, side: "top" as never, volume: 140, delay: -3 })).toEqual({ size: "m", side: "left", volume: 100, delay: 0, box: null });
+    expect(overlayPrefs({ size: "l", side: "right", volume: 0, delay: 600 })).toEqual({ size: "l", side: "right", volume: 0, delay: 60, box: null });
     expect(overlayPrefs({ volume: Number.NaN })).toMatchObject({ volume: 80 });
+    expect(overlayPrefs({ box: { x: 0.7, y: -1, w: 2 } }).box).toEqual({ x: 0.7, y: 0, w: 0.6 });
+    expect(overlayPrefs({ box: { x: "1", y: 0, w: 0.3 } as never }).box).toBeNull();
+    expect(overlayPrefs({ box: { x: 0.1, y: 0.2 } as never }).box).toBeNull();
   });
 
   it("drops broken saved reactors", () => {
@@ -179,5 +187,96 @@ describe("match delay", () => {
     vi.advanceTimersByTime(3100);
     expect(v.paused).toBe(false);
     d.dispose();
+  });
+});
+
+describe("reactor box", () => {
+  const base = overlayPrefs(undefined);
+  const overlap = (a: Rect, b: Rect) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+
+  it("places a box that was never moved by size and side", () => {
+    const r = boxRect(base, 1600, 900);
+    expect(r).toEqual({ x: 24, y: (900 - 270) / 2, w: 480, h: 270 });
+    const right = boxRect({ ...base, side: "right", size: "s" }, 1600, 900);
+    expect(right.x + right.w).toBe(1600 - 24);
+  });
+
+  it("keeps a moved box where it was left, inside the player", () => {
+    const saved = boxPrefs({ x: 800, y: 450, w: 400, h: 225 }, 1600, 900);
+    expect(saved).toEqual({ x: 0.5, y: 0.5, w: 0.25 });
+    // Same place in a smaller window.
+    expect(boxRect({ ...base, box: saved }, 800, 450)).toEqual({ x: 400, y: 225, w: 200, h: 112.5 });
+    // Never outside.
+    const r = boxRect({ ...base, box: { x: 1, y: 1, w: 0.3 } }, 1600, 900);
+    expect(r.x + r.w).toBe(1600);
+    expect(r.y + r.h).toBe(900);
+  });
+
+  it("moves and resizes within the player", () => {
+    const start = { x: 100, y: 100, w: 320, h: 180 };
+    expect(moveBox(start, -500, 2000, 1600, 900)).toEqual({ x: 0, y: 720, w: 320, h: 180 });
+    // Dragging the bottom-right corner grows the box from its top-left.
+    const big = resizeBox(start, "se", 160, 0, 1600, 900);
+    expect(big).toEqual({ x: 100, y: 100, w: 480, h: 270 });
+    // The top-left corner keeps the bottom-right in place.
+    const small = resizeBox(start, "nw", 80, 0, 1600, 900);
+    expect(small.x + small.w).toBe(420);
+    expect(small.y + small.h).toBe(280);
+    expect(small.w).toBe(240);
+    // Not below the smallest size, not past the player's edge or its biggest share.
+    expect(resizeBox(start, "se", -1000, 0, 1600, 900).w).toBe(BOX_MIN_PX);
+    expect(resizeBox(start, "nw", -1000, -1000, 1600, 900).w).toBeCloseTo(100 + 320);
+    expect(resizeBox({ x: 0, y: 0, w: 320, h: 180 }, "se", 5000, 0, 1600, 900).w).toBeCloseTo(1600 * BOX_MAX);
+  });
+
+  it("moves the match out from under the box", () => {
+    // 16:9 window, box on the left: the match shrinks and moves right, under at most 15% of the box.
+    const box = boxRect(base, 1920, 1080);
+    const m = placeMatch(1920, 1080, box, 16 / 9);
+    expect(overlap(m, box)).toBeLessThanOrEqual(MATCH_OVERLAP * box.w * box.h + 1);
+    expect(m.x + m.w).toBeCloseTo(1920);
+    expect(m.w).toBeGreaterThan(1300);
+    expect(m.w / m.h).toBeCloseTo(16 / 9);
+  });
+
+  it("leaves the match alone when the box sits in the black bars", () => {
+    // Ultrawide: a 16:9 match has room beside it.
+    const box = { x: 20, y: 400, w: 280, h: 157.5 };
+    expect(placeMatch(2560, 1080, box, 16 / 9)).toEqual({ x: 320, y: 0, w: 1920, h: 1080 });
+    // A bigger box pushes the match only as far as it has to.
+    const wide = boxRect(base, 2560, 1080);
+    const m = placeMatch(2560, 1080, wide, 16 / 9);
+    expect(overlap(m, wide)).toBeLessThanOrEqual(MATCH_OVERLAP * wide.w * wide.h + 1);
+    expect(m.x + m.w).toBeCloseTo(2560);
+    expect(m.w).toBeGreaterThan(1850);
+  });
+
+  it("uses a corner when that leaves the match clearly bigger", () => {
+    // A big box in the middle: beside, above or below it there is little room.
+    const box = { x: 384, y: 216, w: 1152, h: 648 };
+    const m = placeMatch(1920, 1080, box, 16 / 9);
+    expect(overlap(m, box)).toBeLessThanOrEqual(MATCH_OVERLAP * box.w * box.h + 1);
+    expect(m.x === 0 || m.x + m.w === 1920).toBe(true);
+    expect(m.y === 0 || m.y + m.h === 1080).toBe(true);
+    expect(m.w).toBeGreaterThan(700);
+    // A smaller one: the match just moves up.
+    const mid = { x: 672, y: 405, w: 576, h: 324 };
+    const up = placeMatch(1920, 1080, mid, 16 / 9);
+    expect(up.x).toBeCloseTo((1920 - up.w) / 2);
+    expect(up.y).toBeCloseTo(0);
+    // A box in the bottom-left corner: the match only moves sideways.
+    const low = { x: 0, y: 780, w: 533, h: 300 };
+    const n = placeMatch(1920, 1080, low, 16 / 9);
+    expect(n.y).toBeCloseTo((1080 - n.h) / 2);
+    expect(n.x + n.w).toBeCloseTo(1920);
+    expect(overlap(n, low)).toBeLessThanOrEqual(MATCH_OVERLAP * low.w * low.h + 1);
+  });
+
+  it("moves straight down rather than into a corner when that is nearly as big", () => {
+    const box = { x: 664, y: 232, w: 224, h: 126 };
+    const m = placeMatch(1280, 800, box, 16 / 9);
+    expect(overlap(m, box)).toBeLessThanOrEqual(MATCH_OVERLAP * box.w * box.h + 1);
+    expect(m.x).toBeCloseTo((1280 - m.w) / 2);
+    expect(m.y).toBeGreaterThan(box.y);
   });
 });

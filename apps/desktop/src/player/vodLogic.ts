@@ -2,7 +2,7 @@
 // which episode comes next, where to resume, what a key does, and when a picture counts as stuck.
 import type { Episode, SeriesInfo, StreamKind, VodItem } from "../api";
 
-/** Seconds a Left / Right press moves a movie or an episode. */
+/** Seconds a Left / Right press moves a movie, an episode or live TV. */
 export const SEEK_STEP_SECS = 10;
 /** Seconds of "Next episode" countdown after an episode ends. */
 export const NEXT_COUNTDOWN_SECS = 8;
@@ -107,7 +107,7 @@ export function playerKeyAction(key: string, mode: PlayMode, focus: FocusKind): 
       const dir = key === "ArrowRight" ? 1 : -1;
       if (focus === "control") return { type: "move-focus", dir };
       if (focus === "slider") return { type: "native" };
-      return live ? null : { type: "seek", delta: dir * SEEK_STEP_SECS };
+      return { type: "seek", delta: dir * SEEK_STEP_SECS };
     }
     case " ":
       return focus === "control" ? { type: "native" } : { type: "toggle-pause" };

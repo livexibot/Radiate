@@ -3,13 +3,16 @@
 //!
 //! Radiate never plays or saves YouTube's video itself. The overlay is
 //! YouTube's own embedded player, loaded from a small local page the relay
-//! serves (see `radiate_stream::embed`).
+//! serves (see `radiate_stream::embed`). A video whose owner turned embedding
+//! off can only be watched on youtube.com, so Radiate offers to open that page
+//! in a window of its own, laid over the reactor box.
 
 use radiate_stream::embed::EmbedTarget;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use std::time::Duration;
-use tauri::State;
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use url::Url;
 
 use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
@@ -314,9 +317,207 @@ pub fn reactor_embed_url(
     Ok(state.hub.embed_url(&target))
 }
 
+// ---------------------------------------------------------------------------
+// youtube.com in a window of its own
+
+/// The YouTube window's label. There is only ever one.
+pub const WINDOW: &str = "youtube";
+/// Sent to the app with `false` when the YouTube window closes.
+pub const WINDOW_EVENT: &str = "reactor-window";
+/// Height of youtube.com's top bar; the window is that much taller than the box
+/// so the player itself lines up with it.
+const MASTHEAD: f64 = 56.0;
+
+/// youtube.com's page for a video, or for what a channel is streaming live.
+pub fn watch_url(video_id: Option<&str>, channel_id: Option<&str>) -> Option<Url> {
+    let link = match (video_id, channel_id) {
+        (Some(v), _) if is_video_id(v) => format!("https://www.youtube.com/watch?v={v}"),
+        (None, Some(c)) if is_channel_id(c) => format!("https://www.youtube.com/channel/{c}/live"),
+        _ => return None,
+    };
+    Url::parse(&link).ok()
+}
+
+/// Pages the YouTube window may show: YouTube itself and Google's sign-in and
+/// cookie consent pages. Everything else opens in the browser.
+pub fn stays_in_window(url: &Url) -> bool {
+    if url.scheme() == "about" {
+        return url.as_str() == "about:blank";
+    }
+    if url.scheme() != "https" {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    ["youtube.com", "youtu.be", "google.com"]
+        .iter()
+        .any(|d| host == *d || host.ends_with(&format!(".{d}")))
+}
+
+/// Where the reactor box is in the main window, in CSS pixels.
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct BoxRect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// The YouTube window's place on screen, in logical pixels: over the box,
+/// with youtube.com's top bar above it.
+fn window_place(app: &AppHandle, rect: BoxRect) -> Option<(f64, f64, f64, f64)> {
+    if ![rect.x, rect.y, rect.w, rect.h]
+        .iter()
+        .all(|n| n.is_finite())
+    {
+        return None;
+    }
+    let main = app.get_webview_window("main")?;
+    let scale = main.scale_factor().ok()?;
+    let inner = main.inner_position().ok()?.to_logical::<f64>(scale);
+    let w = rect.w.clamp(320.0, 3840.0);
+    let h = rect.h.clamp(180.0, 2160.0) + MASTHEAD;
+    Some((inner.x + rect.x, inner.y + rect.y - MASTHEAD, w, h))
+}
+
+fn open_in_browser(url: &Url) {
+    if matches!(url.scheme(), "http" | "https") {
+        if let Err(e) = tauri_plugin_opener::open_url(url.as_str(), None::<&str>) {
+            tracing::warn!("couldn't open a link from the YouTube window: {e}");
+        }
+    }
+}
+
+/// Opens youtube.com's page for the reactor in its own window over the
+/// reactor box, or brings the open one there.
+#[tauri::command]
+pub async fn reactor_window_open(
+    app: AppHandle,
+    video_id: Option<String>,
+    channel_id: Option<String>,
+    title: String,
+    rect: BoxRect,
+) -> CmdResult<()> {
+    let url = watch_url(video_id.as_deref(), channel_id.as_deref())
+        .ok_or_else(|| CmdError::new("invalid", "That isn't a YouTube video or channel."))?;
+    let (x, y, w, h) = window_place(&app, rect)
+        .ok_or_else(|| CmdError::new("window", "Radiate's window isn't ready."))?;
+    let title: String = title.chars().filter(|c| !c.is_control()).take(80).collect();
+    let title = if title.trim().is_empty() {
+        "YouTube".to_string()
+    } else {
+        format!("{} · YouTube", title.trim())
+    };
+    if let Some(win) = app.get_webview_window(WINDOW) {
+        let fail = |e: tauri::Error| CmdError::new("window", e.to_string());
+        if win.url().map_or(true, |u| u != url) {
+            win.navigate(url).map_err(fail)?;
+        }
+        win.set_title(&title).map_err(fail)?;
+        win.set_size(tauri::LogicalSize::new(w, h)).map_err(fail)?;
+        win.set_position(tauri::LogicalPosition::new(x, y))
+            .map_err(fail)?;
+        win.unminimize().map_err(fail)?;
+        win.show().map_err(fail)?;
+        win.set_focus().map_err(fail)?;
+        return Ok(());
+    }
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| CmdError::new("window", "Radiate's window isn't ready."))?;
+    let built = WebviewWindowBuilder::new(&app, WINDOW, WebviewUrl::External(url))
+        .title(title)
+        .inner_size(w, h)
+        .position(x, y)
+        .min_inner_size(320.0, 180.0)
+        // Above Radiate's window, but not above other apps.
+        .parent(&main)
+        .and_then(|b| {
+            b.on_navigation(|u| {
+                if stays_in_window(u) {
+                    true
+                } else {
+                    open_in_browser(u);
+                    false
+                }
+            })
+            .on_new_window(|u, _| {
+                open_in_browser(&u);
+                tauri::webview::NewWindowResponse::Deny
+            })
+            .build()
+        });
+    let win = built.map_err(|e| CmdError::new("window", e.to_string()))?;
+    let handle = app.clone();
+    win.on_window_event(move |e| {
+        if let tauri::WindowEvent::Destroyed = e {
+            let _ = handle.emit_to("main", WINDOW_EVENT, false);
+        }
+    });
+    Ok(())
+}
+
+/// Moves the YouTube window back over the reactor box, when it is open.
+#[tauri::command]
+pub fn reactor_window_place(app: AppHandle, rect: BoxRect) -> CmdResult<bool> {
+    let Some(win) = app.get_webview_window(WINDOW) else {
+        return Ok(false);
+    };
+    if let Some((x, y, w, h)) = window_place(&app, rect) {
+        let fail = |e: tauri::Error| CmdError::new("window", e.to_string());
+        win.set_size(tauri::LogicalSize::new(w, h)).map_err(fail)?;
+        win.set_position(tauri::LogicalPosition::new(x, y))
+            .map_err(fail)?;
+    }
+    Ok(true)
+}
+
+/// Closes the YouTube window, when it is open.
+#[tauri::command]
+pub fn reactor_window_close(app: AppHandle) {
+    close_window(&app);
+}
+
+pub fn close_window(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(WINDOW) {
+        let _ = win.destroy();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn youtube_window_pages() {
+        assert_eq!(
+            watch_url(Some("abcDEF12_-x"), None).unwrap().as_str(),
+            "https://www.youtube.com/watch?v=abcDEF12_-x"
+        );
+        assert_eq!(
+            watch_url(None, Some("UCabcdefghijklmnopqrstuv"))
+                .unwrap()
+                .as_str(),
+            "https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv/live"
+        );
+        assert_eq!(watch_url(Some("x\"><script>"), None), None);
+        assert_eq!(watch_url(None, Some("UCshort")), None);
+        assert_eq!(watch_url(None, None), None);
+
+        let ok = |s: &str| stays_in_window(&Url::parse(s).unwrap());
+        assert!(ok("https://www.youtube.com/watch?v=abcDEF12_-x"));
+        assert!(ok("https://consent.youtube.com/m?continue=x"));
+        assert!(ok("https://accounts.google.com/ServiceLogin"));
+        assert!(ok("https://youtu.be/abcDEF12_-x"));
+        assert!(ok("about:blank"));
+        assert!(!ok("http://www.youtube.com/"));
+        assert!(!ok("https://example.com/"));
+        assert!(!ok("https://notyoutube.com/"));
+        assert!(!ok("https://youtube.com.example.com/"));
+        assert!(!ok("javascript:alert(1)"));
+        assert!(!ok("about:srcdoc"));
+    }
 
     fn video(id: &str) -> Option<YtTarget> {
         Some(YtTarget::Video {

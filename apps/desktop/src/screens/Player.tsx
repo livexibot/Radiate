@@ -9,14 +9,17 @@ import { monogram, tone } from "../lib/monogram";
 import { clock, duration, progressOf, timeRange } from "../lib/time";
 import { backPress, emptyEntry, entryNumber, isDue, nextPrevious, pushDigit, popDigit, wrapIndex, type NumberEntry } from "../lib/zap";
 import { FailCard, LimitCard, MpvCard, UnsupportedCard } from "../player/Cards";
+import { LiveBar } from "../player/LiveBar";
 import { NextEpisodeCard, useNextEpisode } from "../player/NextEpisode";
 import { episodeTitle, nextPhase, playerKeyAction, resumeFraction, seekTarget, shouldSaveProgress, type FocusKind } from "../player/vodLogic";
 import { StatsPill } from "../player/StatsPill";
 import { restart } from "../player/streams";
+import { LIVE_SLACK, type LiveWindow } from "../player/timeshift";
 import { matchTrack, TrackMenu } from "../player/TrackMenu";
 import { useStream } from "../player/useStream";
 import { useZapList } from "../player/useZapList";
 import { VideoSurface, type FatalInfo, type MediaControl, type Tracks, type VideoStats } from "../player/VideoSurface";
+import { boxPrefs, boxRect, placeMatch, type Rect } from "../reactor/box";
 import { ReactorIcon } from "../reactor/icon";
 import { ReactorMenu } from "../reactor/ReactorMenu";
 import { ReactorOverlay } from "../reactor/ReactorOverlay";
@@ -90,6 +93,7 @@ export function Player({ route }: { route: PlayerRoute }) {
   const [ended, setEnded] = useState(false);
   const [nextCancelled, setNextCancelled] = useState(false);
   const [scrub, setScrub] = useState<number | null>(null);
+  const [liveWin, setLiveWin] = useState<LiveWindow | null>(null);
   const scrubTimer = useRef<number | null>(null);
   const [alternate, setAlternate] = useState<Channel | null>(null);
   const control = useRef<MediaControl | null>(null);
@@ -100,7 +104,20 @@ export function Player({ route }: { route: PlayerRoute }) {
   const enterLong = useRef(false);
   const appliedPrefFor = useRef<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const [area, setArea] = useState({ w: 0, h: 0 });
+  const [dragBox, setDragBox] = useState<Rect | null>(null);
   const { setFavorite, hide } = useChannelActions();
+
+  // The player's size, for the reactor box and the match beside it.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const measure = () => setArea((a) => (a.w === el.clientWidth && a.h === el.clientHeight ? a : { w: el.clientWidth, h: el.clientHeight }));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const channelGroup = channel?.groupId ?? null;
   const ctx = useMemo<ZapContext | null>(() => route.ctx ?? (channelGroup ? { groupId: channelGroup, favoritesOnly: false } : null), [route.ctx, channelGroup]);
@@ -120,6 +137,7 @@ export function Player({ route }: { route: PlayerRoute }) {
     setEnded(false);
     setNextCancelled(false);
     setScrub(null);
+    setLiveWin(null);
     setPaused(false);
     appliedPrefFor.current = null;
   }, [tkey]);
@@ -367,6 +385,11 @@ export function Player({ route }: { route: PlayerRoute }) {
         }
         case "seek": {
           e.preventDefault();
+          if (isChannel) {
+            const w = control.current?.liveWindow();
+            if (w) control.current?.seekLive(w.behind - action.delta);
+            return;
+          }
           const v = control.current?.video;
           if (v) seekTo(seekTarget(v.currentTime, action.delta, v.duration));
           return;
@@ -530,8 +553,15 @@ export function Player({ route }: { route: PlayerRoute }) {
   else if (state.status === "failed") card = <FailCard message={state.message} onRetry={retryAll} onAnother={alternate ? () => switchTo(alternate) : undefined} />;
   else if (fatal) card = <UnsupportedCard target={target} message={fatal.message} onMpv={setMpvSession} onBeforeOpen={() => restart(target)} />;
 
+  const behindLive = !!liveWin && liveWin.behind >= LIVE_SLACK;
   const progValue = isChannel ? (prog ? progressOf(prog.start, prog.stop, now) : 0) : time.dur ? time.cur / time.dur : 0;
   const zapList = zap.list ?? [];
+
+  // The reactor box, and the match moved out from under it.
+  const reactorBox = reactor && area.w > 0 && area.h > 0 ? (dragBox ?? boxRect(reactors.overlay, area.w, area.h)) : null;
+  const aspect = stats && stats.width > 0 && stats.height > 0 ? stats.width / stats.height : 16 / 9;
+  const matchAt = reactorBox ? placeMatch(area.w, area.h, reactorBox, aspect) : null;
+  const picStyle = matchAt ? { left: matchAt.x, top: matchAt.y, width: matchAt.w, height: matchAt.h, right: "auto", bottom: "auto" } : undefined;
 
   return (
     <div
@@ -556,7 +586,7 @@ export function Player({ route }: { route: PlayerRoute }) {
         });
       }}
     >
-      <div className="pic">
+      <div className={dragBox ? "pic moving" : "pic"} style={picStyle}>
         {channel ? (
           <span className={`stream-backdrop dim ${tone(channel.name)}`} aria-hidden="true">
             <span>{monogram(channel.name)}</span>
@@ -578,9 +608,11 @@ export function Player({ route }: { route: PlayerRoute }) {
             onTime={(cur, dur) => setTime({ cur, dur })}
             startFraction={route.resume}
             live={isChannel}
+            rewind={isChannel}
             latency={prefs?.latency}
             delay={reactor ? reactors.overlay.delay : 0}
             onHold={setHold}
+            onLive={(w) => setLiveWin((o) => (o && w && Math.round(o.behind) === Math.round(w.behind) && Math.round(o.reach) === Math.round(w.reach) ? o : w))}
             onPlayState={(p) => {
               setPaused(p);
               if (!p) setEnded(false);
@@ -596,7 +628,22 @@ export function Player({ route }: { route: PlayerRoute }) {
       </div>
       <div className="pshade" />
 
-      {reactor ? <ReactorOverlay reactor={reactor} overlay={reactors.overlay} chrome={showChrome} onClose={() => pickReactor(null)} onFocusLeft={() => rootRef.current?.focus()} /> : null}
+      {reactor && reactorBox ? (
+        <ReactorOverlay
+          reactor={reactor}
+          overlay={reactors.overlay}
+          rect={reactorBox}
+          area={area}
+          chrome={showChrome}
+          onClose={() => pickReactor(null)}
+          onFocusLeft={() => rootRef.current?.focus()}
+          onDrag={setDragBox}
+          onDrop={(r) => {
+            setDragBox(r);
+            void reactors.setOverlay({ box: boxPrefs(r, area.w, area.h) }).finally(() => setDragBox(null));
+          }}
+        />
+      ) : null}
       {hold !== null && reactor ? (
         <div className="reactor-hold num" role="status">
           Holding the match {hold} s
@@ -663,7 +710,7 @@ export function Player({ route }: { route: PlayerRoute }) {
 
       <div className="pbot">
         <div>
-          {isChannel && prog ? <span className="live-tag">Live</span> : null}
+          {isChannel && prog ? <span className={behindLive ? "live-tag behind" : "live-tag"}>Live</span> : null}
           <h1 className="ptitle">{title}</h1>
           <div className="psub">
             {isChannel && prog ? <span className="num">{timeRange(prog.start, prog.stop)}</span> : null}
@@ -671,7 +718,9 @@ export function Player({ route }: { route: PlayerRoute }) {
           </div>
         </div>
         {isChannel ? (
-          prog ? (
+          liveWin && !card ? (
+            <LiveBar win={liveWin} onSeek={(b) => control.current?.seekLive(b)} onLive={() => control.current?.goLive()} />
+          ) : prog ? (
             <div className="scrub">
               <Progress value={progValue} className="scrub-bar" />
               <div className="times num">

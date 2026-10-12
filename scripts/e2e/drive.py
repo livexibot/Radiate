@@ -9,7 +9,7 @@ Standard library only. Subcommands:
   invoke CMD [JSON_ARGS]   call a backend command through the app
   shot NAME save a screenshot to RUN/NAME.png
   run [SCENARIO ...]       run checks: source, movies, seek, resume, hlsvod, mkv, series, live,
-                           search, reactor, limit, stall, all
+                           rewind, search, reactor, limit, stall, all
 
 The fake provider (fake_xtream.py) must be running; `run` reads its /_stats
 to report connections. Build the app first:
@@ -143,6 +143,29 @@ class Session:
             "return {t: +v.currentTime.toFixed(2), d: Number.isFinite(v.duration) ? +v.duration.toFixed(2) : String(v.duration),"
             " paused: v.paused, ended: v.ended, seeking: v.seeking, rs: v.readyState, w: v.videoWidth, err: v.error && v.error.code,"
             " buffered: b, src: v.currentSrc.slice(0, 80)};"
+        )
+
+    def drag(self, x0: float, y0: float, x1: float, y1: float, steps: int = 10) -> None:
+        """A real mouse drag in window coordinates (hover first, so handles that show on hover are there)."""
+        acts: list[dict] = [
+            {"type": "pointerMove", "duration": 0, "x": int(x0), "y": int(y0), "origin": "viewport"},
+            {"type": "pause", "duration": 400},
+            {"type": "pointerDown", "button": 0},
+        ]
+        for i in range(1, steps + 1):
+            acts.append({"type": "pointerMove", "duration": 40, "x": int(x0 + (x1 - x0) * i / steps), "y": int(y0 + (y1 - y0) * i / steps), "origin": "viewport"})
+        acts.append({"type": "pointerUp", "button": 0})
+        http("POST", f"{self.base}/actions", {"actions": [{"type": "pointer", "id": "mouse", "parameters": {"pointerType": "mouse"}, "actions": acts}]})
+        http("DELETE", f"{self.base}/actions")
+
+    def set_range(self, css: str, value: float) -> None:
+        """Moves a range input the way a drag does (React reads input events)."""
+        self.js(
+            "const n = document.querySelector(arguments[0]);"
+            "Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(n, String(arguments[1]));"
+            "n.dispatchEvent(new Event('input', {bubbles: true}));",
+            css,
+            value,
         )
 
     def wait(self, what: str, fn, timeout: float = 30, every: float = 0.5):
@@ -681,6 +704,78 @@ class Run:
         st = provider_stats(self.args.port)
         r.ok(not st["refused"] and st["peak"] <= 2, f"provider limit never exceeded (peak {st['peak']}, refused {len(st['refused'])})")
 
+    def rewind(self) -> None:
+        """Live TV drags back on the progress bar and forward again, on MPEG-TS and HLS. Behind live
+        nothing catches up (a paused match stays where it was); Go live returns to the edge."""
+        r = self.r
+        chans = self.s.invoke("channels_list", {"query": {"favoritesOnly": False, "includeHidden": False, "offset": 0, "limit": 5}})["items"]  # type: ignore[index]
+
+        def behind() -> float | None:
+            v = self.s.js("const n = document.querySelector('input.seek.live'); return n ? -Number(n.value) : null;")
+            return None if v is None else float(v)  # type: ignore[arg-type]
+
+        def ahead() -> float:
+            x = self.s.video() or {}
+            return round(x["buffered"][-1][1] - x["t"], 2) if x.get("buffered") else 0.0
+
+        for fmt in ("ts", "hls"):
+            self.s.invoke("prefs_set", {"patch": {"liveFormat": fmt, "latency": "normal", "lastChannelId": chans[1]["id"]}})
+            self.home()
+            self.wait_playing(min_t=1, timeout=40)
+            self.s.wait("live bar", lambda: behind() is not None, timeout=10)
+            time.sleep(26)
+            base = ahead()
+            v0 = self.s.video() or {}
+            span = v0["buffered"][-1][1] - v0["buffered"][0][0] if v0.get("buffered") else 0
+            r.ok(span >= 24, f"{fmt}: {round(span)} s of live TV kept to go back to")
+            self.s.set_range("input.seek.live", -15)
+            got = self.s.wait("moved back", lambda: (b := behind()) is not None and b >= 12 and b, timeout=5)
+            time.sleep(1)
+            r.ok(12 <= got <= 18 and abs(ahead() - base - 15) <= 3 and "Go live" in self.s.text(),
+                 f"{fmt}: dragging the bar back 15 s plays from 15 s ago ({got} s behind, {ahead()} s buffered ahead, was {base}); Go live offered")
+            samples = []
+            for _ in range(7):
+                samples.append((self.s.video() or {}).get("t"))
+                time.sleep(1)
+            steps = [round(b2 - a, 2) for a, b2 in zip(samples, samples[1:]) if a is not None and b2 is not None]
+            b = behind() or 0
+            r.ok(12 <= b <= 18 and all(0.7 <= x <= 1.3 for x in steps), f"{fmt}: behind live it plays at normal speed and stays behind ({b} s; steps {steps})")
+            self.shot(f"rewind-{fmt}")
+            self.s.key("ArrowLeft")
+            b = self.s.wait("10 s more", lambda: (x := behind()) is not None and x >= 22 and x, timeout=5)
+            r.ok(22 <= b <= 28, f"{fmt}: Left goes back 10 s more ({b} s behind)")
+            self.s.key("ArrowRight")
+            self.s.key("ArrowRight")
+            b = self.s.wait("forward", lambda: (x := behind()) is not None and x <= 8 and x, timeout=5)
+            r.ok(2 <= b <= 8, f"{fmt}: Right twice goes 20 s forward ({b} s behind)")
+            self.s.set_range("input.seek.live", 0)
+            time.sleep(0.6)  # the bar moves the picture once a drag settles
+            self.s.wait("live again", lambda: (x := behind()) is not None and x < 1.5 and "Go live" not in self.s.text(), timeout=5)
+            r.ok(True, f"{fmt}: dragging to the end is live again")
+            # pause: the picture waits, then plays on from there
+            self.s.key(" ")
+            seen = []
+            for _ in range(6):
+                time.sleep(1)
+                seen.append(behind())
+            self.s.key(" ")
+            self.s.wait("playing after pause", lambda: (x := self.s.video()) and not x["paused"] and x, timeout=5)
+            for _ in range(4):
+                time.sleep(1)
+                seen.append(behind())
+            r.note(f"{fmt}: behind live during the pause and after: {seen}")
+            b = behind() or 0
+            r.ok(4 <= b <= 9, f"{fmt}: after a 6 s pause the match plays on from where it stopped ({b} s behind)")
+            self.s.click(xp_text("button", "Go live"))
+            self.s.wait("go live", lambda: (x := behind()) is not None and x < 1.5 and x >= 0 and "Go live" not in self.s.text(), timeout=5)
+            time.sleep(3)
+            r.ok(ahead() < base + 2 and (behind() or 0) < 1.5, f"{fmt}: Go live jumps to the edge ({ahead()} s ahead, {base} s when it started)")
+            self.leave_player()
+        ours, prov, peak = self.in_use()
+        st = provider_stats(self.args.port)
+        r.ok(not st["refused"] and st["peak"] <= 2, f"provider limit never exceeded (peak {st['peak']}, refused {len(st['refused'])})")
+        self.s.invoke("prefs_set", {"patch": {"liveFormat": "ts"}})
+
     def search(self) -> None:
         """Names written together, with country tags or superscript letters, are found, and the
         Live screen's box searches every group."""
@@ -828,7 +923,21 @@ class Run:
             return self.s.js(  # type: ignore[return-value]
                 "const b = document.querySelector('.reactor'); if (!b) return null; const f = b.querySelector('iframe');"
                 "const r = b.getBoundingClientRect(), p = document.querySelector('.player').getBoundingClientRect();"
-                "return {src: f ? f.src : null, left: Math.round(r.left - p.left), right: Math.round(p.right - r.right), w: +(r.width / p.width).toFixed(3), ratio: +(r.width / r.height).toFixed(2)};"
+                "return {src: f ? f.src : null, left: Math.round(r.left - p.left), right: Math.round(p.right - r.right), w: +(r.width / p.width).toFixed(3), ratio: +(r.width / r.height).toFixed(2),"
+                " x: r.left, y: r.top, pw: r.width, ph: r.height, W: p.width, H: p.height};"
+            )
+
+        def covered() -> float:
+            """Share of the reactor box lying over the match's picture."""
+            return float(self.s.js(  # type: ignore[arg-type]
+                "const a = document.querySelector('.reactor').getBoundingClientRect(), m = document.querySelector('.pic').getBoundingClientRect();"
+                "const ox = Math.max(0, Math.min(a.right, m.right) - Math.max(a.left, m.left)), oy = Math.max(0, Math.min(a.bottom, m.bottom) - Math.max(a.top, m.top));"
+                "return +(ox * oy / (a.width * a.height)).toFixed(3);"
+            ))
+
+        def pic() -> dict:
+            return self.s.js(  # type: ignore[return-value]
+                "const m = document.querySelector('.pic').getBoundingClientRect(); return {x: Math.round(m.left), y: Math.round(m.top), w: Math.round(m.width), h: Math.round(m.height)};"
             )
 
         def ahead() -> float:
@@ -840,11 +949,65 @@ class Run:
         b = self.s.wait("reactor box", lambda: (x := box()) and x["src"] and x, timeout=15)
         r.ok(b["src"].startswith("http://127.0.0.1:") and f"/yt?v={video_id}" in b["src"], f"R shows the reactor box with the relay's page: {b['src']}")
         r.ok(b["left"] <= 40 and 0.28 <= b["w"] <= 0.32 and 1.7 <= b["ratio"] <= 1.8, f"box on the left, 30% of the width, 16:9 ({b})")
+        time.sleep(0.5)
+        m = pic()
+        r.ok(covered() <= 0.16 and m["x"] > b["x"], f"the match moves right, out from under the box: {round(covered() * 100)}% of the box over it, picture {m}")
         page = http_text(b["src"])
         r.ok(f"https://www.youtube.com/embed/{video_id}?" in page, "the page holds YouTube's embedded player for that video")
         loaded = self.s.wait("page script ran", lambda: [m for m in (self.s.js("return window.__yt") or []) if m.get("event") in ("pageReady", "frameLoaded")] or None, timeout=25)
         r.ok(bool(loaded), "the page loaded inside the app window and talks to it")
         self.shot("reactor-box")
+
+        # drag the box by its name bar to the right, then make it bigger by its bottom-right corner
+        b = box() or {}
+        self.s.drag(b["x"] + b["pw"] / 2, b["y"] + 22, b["x"] + b["pw"] / 2 + b["W"] * 0.5, b["y"] + 22 - 60)
+        moved = self.s.wait("box dragged", lambda: (x := box()) and x["x"] > b["x"] + b["W"] * 0.4 and x, timeout=5)
+        r.ok(abs(moved["y"] - (b["y"] - 60)) <= 3 and abs(moved["pw"] - b["pw"]) <= 1, f"dragging the name bar moves the box ({round(b['x'])},{round(b['y'])} to {round(moved['x'])},{round(moved['y'])})")
+        time.sleep(0.5)
+        m = pic()
+        r.ok(covered() <= 0.16 and m["x"] + m["w"] <= moved["x"] + moved["pw"] * 0.2, f"the match moves to the other side: {round(covered() * 100)}% of the box over it, picture {m}")
+        b = moved
+        self.s.drag(b["x"] + b["pw"] - 6, b["y"] + b["ph"] - 6, b["x"] + b["pw"] - 6 - 160, b["y"] + b["ph"] - 6)
+        sized = self.s.wait("box resized", lambda: (x := box()) and x["pw"] < b["pw"] - 100 and x, timeout=5)
+        r.ok(abs(sized["x"] - b["x"]) <= 1 and abs(sized["y"] - b["y"]) <= 1 and 1.7 <= sized["ratio"] <= 1.8,
+             f"dragging the bottom-right corner resizes from the top-left and stays 16:9 ({round(b['pw'])} to {round(sized['pw'])} wide, ratio {sized['ratio']})")
+        saved = self.s.wait("box saved", lambda: (o := self.s.invoke("prefs_get")["reactorOverlay"]) and o.get("box") and o, timeout=5)  # type: ignore[index]
+        bx = saved["box"]
+        r.ok(abs(bx["x"] * sized["W"] - sized["x"]) <= 2 and abs(bx["w"] * sized["W"] - sized["pw"]) <= 2, f"where it was left is saved: {bx}")
+        self.shot("reactor-moved")
+        # next time: the same place
+        self.leave_player()
+        self.home()
+        self.wait_playing(min_t=0.5, timeout=40)
+        self.s.key("r")
+        again = self.s.wait("reactor box again", lambda: (x := box()) and x["src"] and x, timeout=15)
+        r.ok(abs(again["x"] - sized["x"]) <= 2 and abs(again["y"] - sized["y"]) <= 2 and abs(again["pw"] - sized["pw"]) <= 2,
+             f"the next time it opens where it was left ({round(again['x'])},{round(again['y'])}, {round(again['pw'])} wide)")
+
+        # a video whose owner doesn't allow other apps: say so and offer youtube.com in its own window
+        self.s.js(
+            "const f = document.querySelector('.reactor iframe');"
+            "window.dispatchEvent(new MessageEvent('message', {data: {radiate: 'yt', data: {event: 'onError', info: 150}}, source: f.contentWindow}));"
+        )
+        msg = lambda: str(self.s.js("const m = document.querySelector('.reactor-msg'); return m ? m.title : '';"))  # noqa: E731 (shown in full only when the box is big enough)
+        self.s.wait("blocked message", lambda: "doesn't allow this video" in msg() and self.s.exists(xp_text("button", "Open on YouTube")), timeout=5)
+        r.ok(True, "an embedding refusal says so and offers Open on YouTube")
+        rect = {"x": 10, "y": 10, "w": 400, "h": 225}
+        r.ok(self.s.invoke("reactor_window_place", {"rect": rect}) is False, "no YouTube window before asking")
+        self.s.click(xp_text("button", "Open on YouTube"))
+        self.s.wait("own window", lambda: "in its own window" in msg(), timeout=15)
+        r.ok(self.s.invoke("reactor_window_place", {"rect": rect}) is True, "Open on YouTube opens youtube.com in a window of its own")
+        handles = http("GET", f"{self.s.base}/window/handles")["value"]
+        r.note(f"window handles seen by the driver: {len(handles)}")
+        self.shot("reactor-own-window")
+        self.s.click(xp_text("button", "Close window"))
+        self.s.wait("window closed", lambda: self.s.invoke("reactor_window_place", {"rect": rect}) is False, timeout=10)
+        r.ok("Open on YouTube" in self.s.text(), "Close window closes it and the box offers it again")
+        self.s.click(xp_text("button", "Open on YouTube"))
+        self.s.wait("own window again", lambda: "in its own window" in msg(), timeout=15)
+        self.s.invoke("reactor_window_close")
+        self.s.wait("back to message", lambda: "Open on YouTube" in self.s.text(), timeout=10)
+        r.ok(True, "closing the YouTube window brings the box back to the message")
 
         # menu: size and side
         self.s.click("//button[contains(@class,'cb')][contains(.,'Reactor')]")
@@ -854,7 +1017,7 @@ class Run:
         b = self.s.wait("box moved", lambda: (x := box()) and x["right"] <= 40 and x["w"] >= 0.38 and x, timeout=5)
         r.ok(True, f"menu: large on the right ({b})")
         saved = self.s.invoke("prefs_get")["reactorOverlay"]  # type: ignore[index]
-        r.ok(saved.get("size") == "l" and saved.get("side") == "right", f"overlay settings saved: {saved}")
+        r.ok(saved.get("size") == "l" and saved.get("side") == "right" and saved.get("box") is None, f"overlay settings saved, and a preset puts the box back: {saved}")
 
         # hold the match back 5 s
         self.s.click("//*[contains(@class,'reactmenu')]//button[@aria-label='Five seconds more delay']")
@@ -915,7 +1078,7 @@ class Run:
         r.ok(not st["refused"] and st["peak"] <= 2, f"provider limit never exceeded (peak {st['peak']}, refused {len(st['refused'])})")
 
 
-SCENARIOS = ["source", "movies", "seek", "resume", "hlsvod", "mkv", "series", "live", "search", "reactor", "limit", "stall"]
+SCENARIOS = ["source", "movies", "seek", "resume", "hlsvod", "mkv", "series", "live", "rewind", "search", "reactor", "limit", "stall"]
 
 
 def run(args: argparse.Namespace) -> None:

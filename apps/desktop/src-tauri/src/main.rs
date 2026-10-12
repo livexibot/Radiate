@@ -64,15 +64,28 @@ fn main() {
                 let _ = w.set_focus();
             }
         }))
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_denylist(&[youtube::WINDOW])
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(setup)
         .on_window_event(|window, event| {
-            if let WindowEvent::Destroyed = event {
-                shutdown(window.app_handle());
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                // The YouTube window goes with the main one, so closing it quits.
+                WindowEvent::CloseRequested { .. } => youtube::close_window(window.app_handle()),
+                WindowEvent::Destroyed => {
+                    youtube::close_window(window.app_handle());
+                    shutdown(window.app_handle());
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -117,6 +130,9 @@ fn main() {
             youtube::youtube_resolve,
             youtube::youtube_live_now,
             youtube::reactor_embed_url,
+            youtube::reactor_window_open,
+            youtube::reactor_window_place,
+            youtube::reactor_window_close,
         ])
         .build(tauri::generate_context!())
         .expect("Radiate failed to start")

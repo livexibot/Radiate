@@ -46,6 +46,26 @@ page.
   "ESPN2"), shows every match instead of the first 12, and the Live
   screen's box searches every group, not only the open one.
 
+## Decisions (12 October 2026, 0.2.2)
+
+- Live TV keeps the last 5 minutes it played (in the full player, as far
+  as the browser's memory allows; Multiview tiles keep 30 s). The live
+  progress bar is that window: drag back to watch again, forward to catch
+  up, Left and Right move 10 s, Go live returns. Behind live (rewound or
+  paused) nothing catches up by itself. Radiate keeps live MPEG-TS near
+  the edge itself (`liveFollow` in `player/latency.ts`) instead of
+  mpegts.js's live sync, so it can stop while you watch from behind; HLS
+  switches hls.js to `HLS_BEHIND`.
+- The reactor box moves by its name bar and resizes by its corners
+  (16:9), and opens where it was left next time (`reactorOverlay.box`);
+  the Size and Side presets put it back. The match moves and shrinks so
+  at most 15% of the box lies over it (`placeMatch` in `reactor/box.ts`):
+  beside a 16:9 picture on a wide window it sits in the black bars.
+- A video whose owner turned embedding off is not worked around (no
+  other player, no faked embed origin). The box says so and offers Open
+  on YouTube: youtube.com's own page in a window of its own over the box,
+  above Radiate's window, with no access to Radiate's commands.
+
 ## Layout
 
 ```

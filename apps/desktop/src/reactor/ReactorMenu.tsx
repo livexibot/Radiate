@@ -59,6 +59,8 @@ export function ReactorMenu({ active, onPick, onClose, canDelay }: Props) {
   };
 
   const delay = overlay.delay;
+  // A box that was moved or resized by hand shows no preset; picking one puts it back.
+  const preset = !overlay.box;
   return (
     <div className="trackmenu reactmenu" ref={ref} role="menu" onKeyDown={onKey} data-nav="self">
       <b>Reactor</b>
@@ -67,7 +69,9 @@ export function ReactorMenu({ active, onPick, onClose, canDelay }: Props) {
       </button>
       {reactors.map((r) => (
         <button type="button" key={r.id} role="menuitemradio" aria-checked={r.id === active} className={r.id === active ? "opt sel" : "opt"} onClick={() => onPick(r.id)}>
-          <span className="ellipsis">{r.name}</span>
+          <span className="ellipsis" title={r.name}>
+            {r.name}
+          </span>
           <span>{r.kind === "channel" ? "Channel" : "Video"}</span>
         </button>
       ))}
@@ -78,7 +82,7 @@ export function ReactorMenu({ active, onPick, onClose, canDelay }: Props) {
         <span>Size</span>
         <div className="seg" role="radiogroup" aria-label="Reactor size">
           {SIZES.map((s) => (
-            <button type="button" key={s.id} role="radio" aria-checked={overlay.size === s.id} className={overlay.size === s.id ? "on" : ""} onClick={() => void setOverlay({ size: s.id })}>
+            <button type="button" key={s.id} role="radio" aria-checked={preset && overlay.size === s.id} className={preset && overlay.size === s.id ? "on" : ""} onClick={() => void setOverlay({ size: s.id, box: null })}>
               {s.label}
             </button>
           ))}
@@ -88,7 +92,7 @@ export function ReactorMenu({ active, onPick, onClose, canDelay }: Props) {
         <span>Side</span>
         <div className="seg" role="radiogroup" aria-label="Reactor side">
           {SIDES.map((s) => (
-            <button type="button" key={s.id} role="radio" aria-checked={overlay.side === s.id} className={overlay.side === s.id ? "on" : ""} onClick={() => void setOverlay({ side: s.id })}>
+            <button type="button" key={s.id} role="radio" aria-checked={preset && overlay.side === s.id} className={preset && overlay.side === s.id ? "on" : ""} onClick={() => void setOverlay({ side: s.id, box: null })}>
               {s.label}
             </button>
           ))}

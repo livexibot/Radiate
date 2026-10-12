@@ -12,6 +12,13 @@ export interface Reactor {
 export type OverlaySize = "s" | "m" | "l";
 export type OverlaySide = "left" | "right";
 
+/** Where the box was left: left and top as shares of the player's width and height, width as a share of its width. */
+export interface BoxPrefs {
+  x: number;
+  y: number;
+  w: number;
+}
+
 export interface OverlayPrefs {
   size: OverlaySize;
   side: OverlaySide;
@@ -19,9 +26,11 @@ export interface OverlayPrefs {
   volume: number;
   /** Seconds the match is held back to line up with the reactor. */
   delay: number;
+  /** Set once the box is moved or resized; until then size and side place it. */
+  box: BoxPrefs | null;
 }
 
-export const DEFAULT_OVERLAY: OverlayPrefs = { size: "m", side: "left", volume: 80, delay: 0 };
+export const DEFAULT_OVERLAY: OverlayPrefs = { size: "m", side: "left", volume: 80, delay: 0, box: null };
 export const MAX_DELAY = 60;
 
 export function overlayPrefs(p: Partial<OverlayPrefs> | null | undefined): OverlayPrefs {
@@ -31,7 +40,16 @@ export function overlayPrefs(p: Partial<OverlayPrefs> | null | undefined): Overl
     side: o.side === "right" ? "right" : "left",
     volume: clamp(Math.round(Number(o.volume)), 0, 100, DEFAULT_OVERLAY.volume),
     delay: clamp(Math.round(Number(o.delay)), 0, MAX_DELAY, 0),
+    box: boxOf(o.box),
   };
+}
+
+function boxOf(b: unknown): BoxPrefs | null {
+  if (!b || typeof b !== "object") return null;
+  const { x, y, w } = b as Record<string, unknown>;
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : Number.NaN);
+  if ([x, y, w].some((v) => Number.isNaN(n(v)))) return null;
+  return { x: clamp(n(x), 0, 1, 0), y: clamp(n(y), 0, 1, 0), w: clamp(n(w), 0.05, 0.6, 0.3) };
 }
 
 function clamp(n: number, lo: number, hi: number, fallback: number): number {
@@ -110,6 +128,11 @@ export function playerErrorText(code: number): string {
     default:
       return "YouTube's player stopped.";
   }
+}
+
+/** True when youtube.com itself may still show what its embedded player refused (not for a bad link or a removed video). */
+export function canOpenOnYouTube(code: number): boolean {
+  return code !== 2 && code !== 100;
 }
 
 export function newReactorId(): string {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Episode, SeriesInfo } from "../api";
-import { hlsConfig, latencyOf, mpegtsConfig, startBufferSecs } from "../player/latency";
+import { followStep, HLS_BEHIND, hlsConfig, latencyOf, liveFollow, mpegtsConfig, REWIND_SECS, startBufferSecs } from "../player/latency";
+import { gapJump, LIVE_SLACK, liveWindow, playableSpan, rewindTarget } from "../player/timeshift";
 import {
   episodeLabel,
   nextEpisode,
@@ -107,7 +108,8 @@ describe("player keys", () => {
   it("seeks ten seconds with Left and Right in VOD, also from the seek bar", () => {
     expect(playerKeyAction("ArrowRight", "vod", "none")).toEqual({ type: "seek", delta: 10 });
     expect(playerKeyAction("ArrowLeft", "vod", "seek")).toEqual({ type: "seek", delta: -10 });
-    expect(playerKeyAction("ArrowLeft", "live", "none")).toBeNull();
+    expect(playerKeyAction("ArrowLeft", "live", "none")).toEqual({ type: "seek", delta: -10 });
+    expect(playerKeyAction("ArrowRight", "live", "seek")).toEqual({ type: "seek", delta: 10 });
     expect(playerKeyAction("ArrowLeft", "vod", "control")).toEqual({ type: "move-focus", dir: -1 });
     expect(playerKeyAction("ArrowLeft", "vod", "slider")).toEqual({ type: "native" });
   });
@@ -164,18 +166,81 @@ describe("latency", () => {
     for (const l of ["low", "normal", "stable"] as const) {
       const c = hlsConfig(l, true);
       expect(c.liveMaxLatencyDurationCount as number).toBeGreaterThan(c.liveSyncDurationCount as number);
-      const t = mpegtsConfig(l, true);
-      expect(t.liveSyncTargetLatency as number).toBeLessThan(t.liveSyncMaxLatency as number);
+      const f = liveFollow(l);
+      expect(f.targetLatency).toBeLessThan(f.maxLatency);
     }
-    const target = (l: "low" | "normal" | "stable") => mpegtsConfig(l, true).liveSyncTargetLatency as number;
+    const target = (l: "low" | "normal" | "stable") => liveFollow(l).targetLatency;
     expect(target("low")).toBeLessThan(target("normal"));
     expect(target("normal")).toBeLessThan(target("stable"));
   });
   it("doesn't chase the live edge by jumping unless low, and never for movies", () => {
-    expect(mpegtsConfig("normal", true).liveBufferLatencyChasing).toBe(false);
-    expect(mpegtsConfig("stable", true).liveBufferLatencyChasing).toBe(false);
-    expect(mpegtsConfig("low", false).liveSync).toBe(false);
+    expect(liveFollow("normal").jumpAbove).toBeNull();
+    expect(liveFollow("stable").jumpAbove).toBeNull();
+    expect(liveFollow("low").jumpAbove).toBeGreaterThan(liveFollow("low").maxLatency);
+    // mpegts.js never catches up by itself; Radiate does, and stops while you watch from behind.
+    for (const live of [true, false]) {
+      expect(mpegtsConfig("low", live).liveSync).toBe(false);
+      expect(mpegtsConfig("low", live).liveBufferLatencyChasing).toBe(false);
+    }
     expect(hlsConfig("low", false).lowLatencyMode).toBe(false);
+  });
+  it("keeps up with the edge by playing faster, then normal", () => {
+    const f = liveFollow("normal");
+    expect(followStep(6, 1, f)).toEqual({ rate: f.rate, jump: false });
+    // Between target and max: keep the speed it has.
+    expect(followStep(3, f.rate, f)).toEqual({ rate: f.rate, jump: false });
+    expect(followStep(3, 1, f)).toEqual({ rate: 1, jump: false });
+    expect(followStep(2, f.rate, f)).toEqual({ rate: 1, jump: false });
+    expect(followStep(20, 1, liveFollow("low"))).toEqual({ rate: 1, jump: true });
+  });
+  it("keeps minutes of live TV to rewind", () => {
+    expect(hlsConfig("normal", true, true).backBufferLength).toBe(REWIND_SECS);
+    expect(hlsConfig("normal", false, true).backBufferLength).toBe(30);
+    expect(mpegtsConfig("normal", true, true).autoCleanupMinBackwardDuration).toBe(REWIND_SECS);
+    expect(mpegtsConfig("normal", true, true).autoCleanupMaxBackwardDuration as number).toBeGreaterThan(REWIND_SECS);
+    // Multiview tiles keep little.
+    expect(hlsConfig("normal", true).backBufferLength).toBe(30);
+    expect(mpegtsConfig("normal", true).autoCleanupMinBackwardDuration).toBe(30);
+    // Behind live, hls.js loads up to the edge and never jumps or speeds up.
+    expect(HLS_BEHIND.maxBufferLength).toBeGreaterThan(REWIND_SECS);
+    expect(HLS_BEHIND.liveMaxLatencyDurationCount).toBe(Infinity);
+    expect(HLS_BEHIND.maxLiveSyncPlaybackRate).toBe(1);
+  });
+});
+
+describe("live rewind", () => {
+  const ranges = (...r: [number, number][]) => ({ length: r.length, start: (i: number) => r[i]![0], end: (i: number) => r[i]![1] });
+
+  it("finds the stretch that plays without a gap", () => {
+    expect(playableSpan(ranges(), 5)).toBeNull();
+    expect(playableSpan(ranges([0, 50], [51, 100], [130, 200]), 60)).toEqual({ start: 0, end: 100 });
+    expect(playableSpan(ranges([0, 50], [50.4, 100], [130, 200]), 150)).toEqual({ start: 130, end: 200 });
+    // Not buffered: the newest stretch.
+    expect(playableSpan(ranges([0, 50], [130, 200]), 500)).toEqual({ start: 130, end: 200 });
+  });
+
+  it("measures how far behind live and how far back", () => {
+    expect(liveWindow(97, 97, 40)).toEqual({ behind: 0, reach: 57 });
+    expect(liveWindow(60, 97, 40)).toEqual({ behind: 37, reach: 57 });
+    // Never more than what is kept.
+    expect(liveWindow(0, 1000, 0)).toEqual({ behind: REWIND_SECS, reach: REWIND_SECS });
+  });
+
+  it("plays over a short hole in the stream", () => {
+    const b = ranges([0, 60.08], [61.09, 116]);
+    expect(gapJump(b, 60.05)).toBeCloseTo(61.14);
+    expect(gapJump(b, 50)).toBeNull();
+    expect(gapJump(ranges([0, 60], [70, 116]), 59.9)).toBeNull();
+    expect(gapJump(ranges([0, 60]), 59.9)).toBeNull();
+  });
+
+  it("goes back only as far as is buffered, and near live means live", () => {
+    const w = { behind: 0, reach: 57 };
+    expect(rewindTarget(30, w, 97)).toBe(67);
+    expect(rewindTarget(120, w, 97)).toBe(40);
+    expect(rewindTarget(1, w, 97)).toBeNull();
+    expect(rewindTarget(-5, w, 97)).toBeNull();
+    expect(LIVE_SLACK).toBeGreaterThan(1);
   });
   it("only stable waits for a buffer before a live MPEG-TS starts", () => {
     expect(startBufferSecs("low")).toBe(0);

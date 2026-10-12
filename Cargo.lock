@@ -3296,7 +3296,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "radiate-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "flate2",
  "futures",
@@ -3316,7 +3316,7 @@ dependencies = [
 
 [[package]]
 name = "radiate-desktop"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "keyring",
  "radiate-core",
@@ -3340,7 +3340,7 @@ dependencies = [
 
 [[package]]
 name = "radiate-stream"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axum",
  "bytes",

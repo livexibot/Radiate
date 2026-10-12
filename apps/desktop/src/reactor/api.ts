@@ -44,3 +44,48 @@ function mockPage(label: string): string {
   const html = `<!doctype html><body style="margin:0;height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,#3a1d5c,#11182b);color:#eef1f8;font:600 14px system-ui">YouTube · ${label.replace(/[^\w-]/g, "")}</body>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
+
+export interface BoxOnScreen {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Opens youtube.com's own page for a video or a channel's stream in a window of its own over the
+ * reactor box. For videos whose owner doesn't allow them in other apps.
+ */
+export async function openWindow(target: { videoId?: string | null; channelId?: string | null }, title: string, rect: BoxOnScreen): Promise<void> {
+  if (isTauri) return invoke<void>("reactor_window_open", { videoId: target.videoId ?? null, channelId: target.channelId ?? null, title, rect });
+  const url = target.videoId ? `https://www.youtube.com/watch?v=${encodeURIComponent(target.videoId)}` : `https://www.youtube.com/channel/${encodeURIComponent(target.channelId ?? "")}/live`;
+  window.open(url, "radiate-youtube", `popup,width=${Math.round(rect.w)},height=${Math.round(rect.h + 56)}`);
+}
+
+/** Moves the YouTube window back over the box; false when it isn't open. */
+export async function placeWindow(rect: BoxOnScreen): Promise<boolean> {
+  if (!isTauri) return false;
+  return invoke<boolean>("reactor_window_place", { rect });
+}
+
+export async function closeWindow(): Promise<void> {
+  if (isTauri) await invoke<void>("reactor_window_close", {});
+}
+
+/** Calls back when the YouTube window is closed. Returns a function that stops listening. */
+export async function onWindowClosed(cb: () => void): Promise<() => void> {
+  if (!isTauri) return () => undefined;
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<boolean>("reactor-window", (e) => {
+    if (e.payload === false) cb();
+  });
+}
+
+/** Calls back when Radiate's window moves or changes size. */
+export async function onMainWindowMoved(cb: () => void): Promise<() => void> {
+  if (!isTauri) return () => undefined;
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  const w = getCurrentWindow();
+  const stops = await Promise.all([w.onMoved(cb), w.onResized(cb)]);
+  return () => stops.forEach((s) => s());
+}

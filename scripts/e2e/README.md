@@ -41,9 +41,13 @@ Left / Right, space, Up / Down don't zap, paused 20 s with no failure card,
 progress saved on stop), `resume`, `hlsvod`, `mkv` (the mpv card), `series`
 (episode, "Next episode", cancel, auto-advance, continue watching), `live`
 (live format preference, preview to full player, smooth MPEG-TS, zapping
-within the limit, stable latency), `search` (names written together or with
-country tags and superscript letters are found; the Live box searches every
-group), `reactor` (the YouTube box, its menu and holding the match back),
+within the limit, stable latency), `rewind` (dragging the live bar back and
+forward on MPEG-TS and HLS, Left / Right, a pause that plays on from where it
+stopped, Go live), `search` (names written together or with country tags and
+superscript letters are found; the Live box searches every group), `reactor`
+(the YouTube box: the match moves out from under it, dragging and resizing it,
+where it was left kept for next time, Open on YouTube in its own window for a
+video that doesn't allow other apps, its menu and holding the match back),
 `limit` (a one-stream account whose count lags: zapping never shows the
 limit card; a stream reported on another device does, the card checks again
 by itself, and Play anyway asks the provider), `stall` (a frozen live picture
