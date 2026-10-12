@@ -27,6 +27,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let core = Arc::new(Core::open(&data_dir, secrets::secret_store())?);
     let user_agent = format!("Radiate/{}", app.package_info().version);
     let hub = tauri::async_runtime::block_on(StreamHub::start(Some(user_agent)))?;
+    state::restore_recent_closes(&hub, &data_dir);
 
     background::forward_stream_events(handle.clone(), hub.clone());
     background::keep_guides_fresh(handle, core.clone());

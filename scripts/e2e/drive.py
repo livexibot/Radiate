@@ -8,7 +8,8 @@ Standard library only. Subcommands:
   js CODE   run JavaScript in the app and print the result (async: call done(value))
   invoke CMD [JSON_ARGS]   call a backend command through the app
   shot NAME save a screenshot to RUN/NAME.png
-  run [SCENARIO ...]       run checks: source, movies, seek, hlsvod, mkv, resume, series, live, all
+  run [SCENARIO ...]       run checks: source, movies, seek, resume, hlsvod, mkv, series, live,
+                           search, reactor, limit, stall, all
 
 The fake provider (fake_xtream.py) must be running; `run` reads its /_stats
 to report connections. Build the app first:
@@ -101,7 +102,8 @@ class Session:
             "n.dispatchEvent(new Event('input', {bubbles: true}));",
             xpath,
         )
-        http("POST", f"{self.base}/element/{el}/value", {"text": text})
+        if text:
+            http("POST", f"{self.base}/element/{el}/value", {"text": text})
 
     # -- page helpers (JS clicks: the player hides its controls) --
 
@@ -407,7 +409,7 @@ class Run:
             lambda: next((x for x in (self.s.invoke("sources_list") or []) if x["status"] == "idle" and x["channelCount"] > 0), None),  # type: ignore[union-attr]
             timeout=60,
         )
-        r.ok(src["channelCount"] == 4 and src["movieCount"] == 4 and src["seriesCount"] == 1,
+        r.ok(src["channelCount"] == 5 and src["movieCount"] == 4 and src["seriesCount"] == 1,
              f"Xtream source added{' through onboarding' if used_ui else ''}: {src['channelCount']} channels, {src['movieCount']} movies, {src['seriesCount']} series, limit {src['maxConnections']}")
         if used_ui:
             # finish the groups step when there is one
@@ -679,6 +681,108 @@ class Run:
         st = provider_stats(self.args.port)
         r.ok(not st["refused"] and st["peak"] <= 2, f"provider limit never exceeded (peak {st['peak']}, refused {len(st['refused'])})")
 
+    def search(self) -> None:
+        """Names written together, with country tags or superscript letters, are found, and the
+        Live screen's box searches every group."""
+        r = self.r
+        self.go("search")
+        box = "//input[@aria-label='Search']"
+        self.s.wait("search box", lambda: self.s.exists(box), timeout=10)
+        self.s.type_into(box, "arena sports")
+        t = self.s.wait("results", lambda: (x := self.s.text()) and "ARENASPORTS" in x and x, timeout=10)
+        r.ok(all(n in t for n in ("Arena Sports 1", "Arena Sports 2", "UK| ARENASPORTS 3")), "search 'arena sports' also finds 'UK| ARENASPORTS 3 ᴴᴰ'")
+        self.s.type_into(box, "arenasports 3")
+        t = self.s.wait("narrowed", lambda: (x := self.s.text()) and "ARENASPORTS 3" in x and "Arena Sports 1" not in x and x, timeout=10)
+        r.ok(True, "search 'arenasports 3' finds just that channel")
+        self.shot("search")
+        self.go("live")
+        news = "//nav[@aria-label='Groups']//button[contains(.,'News')]"
+        self.s.wait("groups", lambda: self.s.exists(news), timeout=20)
+        self.s.click(news)
+        self.s.wait("news group", lambda: "Harbor News" in self.s.text() and "Field Sports" not in self.s.text(), timeout=10)
+        self.s.type_into("//input[@aria-label='Search all channels']", "arena 3")
+        t = self.s.wait("live search", lambda: (x := self.s.text()) and "ARENASPORTS 3" in x and x, timeout=10)
+        r.ok("Harbor News" not in t and "· Sports" in t, "on Live, typing searches every group and shows each channel's group")
+        self.shot("live-search")
+        self.s.type_into("//input[@aria-label='Search all channels']", "")
+        self.go("settings")
+
+    def limit(self) -> None:
+        """A one-stream account whose count lags (it reports a stream for 30 s after it stopped).
+        A stream the provider reports on another device shows the limit card, which looks again by
+        itself and plays once that stream stops; Play anyway asks the provider regardless. Zapping
+        never shows the card. Radiate itself never goes over the limit."""
+        r = self.r
+        port = self.args.port
+        card = "Your provider allows 1 stream at once"
+        elsewhere = "on other devices or apps"
+
+        def phantom(n: int) -> None:
+            http_text(f"http://127.0.0.1:{port}/_phantom?n={n}")
+
+        def last_live_request() -> float:
+            return max((q["t"] for q in provider_stats(port)["requests"] if q["path"].startswith("/live/")), default=0.0)
+
+        self.go("settings")
+        provider_down(self.args)
+        provider_up(self.args, ["--max", "1", "--report-lag", "30"])
+        try:
+            self.s.invoke("prefs_set", {"patch": {"liveFormat": "ts", "latency": "normal"}})
+            chans = self.s.invoke("channels_list", {"query": {"favoritesOnly": False, "includeHidden": False, "offset": 0, "limit": 10}})["items"]  # type: ignore[index]
+            # a start re-reads the account, so the app knows the limit is 1 from here on
+            started = self.s.invoke("play_start", {"target": {"type": "channel", "id": chans[0]["id"]}})
+            self.s.invoke("play_stop", {"sessionId": started["sessionId"]})  # type: ignore[index]
+            src = next(x for x in (self.s.invoke("sources_list") or []) if x.get("server", "").endswith(f":{port}"))  # type: ignore[union-attr]
+            r.ok(src["maxConnections"] == 1, f"account limit is now {src['maxConnections']}")
+            self.s.invoke("prefs_set", {"patch": {"lastChannelId": chans[0]["id"]}})
+
+            # more than any stream we closed lately: really someone else
+            phantom(20)
+            self.home()
+            self.s.wait("limit card", lambda: card in self.s.text() and "Checking again in" in self.s.text(), timeout=30)
+            t = self.s.text()
+            r.ok(elsewhere in t and "Play anyway" in t and "Try again" in t and "Stop " not in t,
+                 "streams reported elsewhere: the card says so, checks again by itself, offers Try again and Play anyway")
+            self.shot("limit-elsewhere")
+            phantom(0)
+            t0 = time.time()
+            self.wait_playing(min_t=0.5, timeout=40)
+            r.ok(time.time() - t0 <= 16, f"when the other stream stops it plays by itself, {round(time.time() - t0, 1)} s later")
+
+            # zapping on a lagging count
+            seen = []
+            for i in range(4):
+                before = last_live_request()
+                self.s.key("ArrowDown")
+                got = self.s.wait(
+                    f"zap {i + 1}",
+                    lambda: ("card" if card in self.s.text() else None)
+                    or (last_live_request() > before and (x := self.s.video()) and x["rs"] >= 2 and not x["paused"] and x["t"] > 0.5 and "playing"),
+                    timeout=30,
+                )
+                st = provider_stats(port)
+                seen.append((got, st["reported"], st["inUse"]))
+                time.sleep(1.5)
+            r.ok(all(g == "playing" for g, _, _ in seen), f"zapping 4 times never shows the card: (result, provider reports, really in use) {seen}")
+            r.ok(max(rep for _, rep, _ in seen) >= 2, "the provider's count really lagged behind")
+
+            # Play anyway: the provider decides
+            self.leave_player()
+            phantom(20)
+            self.home()
+            self.s.wait("limit card again", lambda: card in self.s.text(), timeout=30)
+            self.s.click(xp_text("button", "Play anyway"))
+            self.wait_playing(min_t=0.5, timeout=40)
+            r.ok(card not in self.s.text(), "Play anyway asks the provider, which serves it")
+            ours, prov, peak = self.in_use()
+            st = provider_stats(port)
+            r.ok(ours == 1 and peak <= 1 and not st["refused"], f"never over the limit: app {ours}, provider {prov}, peak {peak}, refused {len(st['refused'])}")
+        finally:
+            phantom(0)
+            self.go("settings")
+            provider_down(self.args)
+            provider_up(self.args, ["--max", str(self.args.max)])
+
     def stall(self) -> None:
         """A live picture that stops moving becomes a failure card (the provider goes quiet)."""
         r = self.r
@@ -811,7 +915,7 @@ class Run:
         r.ok(not st["refused"] and st["peak"] <= 2, f"provider limit never exceeded (peak {st['peak']}, refused {len(st['refused'])})")
 
 
-SCENARIOS = ["source", "movies", "seek", "resume", "hlsvod", "mkv", "series", "live", "reactor", "stall"]
+SCENARIOS = ["source", "movies", "seek", "resume", "hlsvod", "mkv", "series", "live", "search", "reactor", "limit", "stall"]
 
 
 def run(args: argparse.Namespace) -> None:

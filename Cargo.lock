@@ -3296,7 +3296,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "radiate-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "flate2",
  "futures",
@@ -3310,12 +3310,13 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "unicode-normalization",
  "xxhash-rust",
 ]
 
 [[package]]
 name = "radiate-desktop"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "keyring",
  "radiate-core",
@@ -3339,7 +3340,7 @@ dependencies = [
 
 [[package]]
 name = "radiate-stream"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axum",
  "bytes",
@@ -5247,6 +5248,15 @@ name = "unicode-ident"
 version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+dependencies = [
+ "tinyvec",
+]
 
 [[package]]
 name = "unicode-segmentation"

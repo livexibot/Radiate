@@ -25,9 +25,9 @@ function stopEntry(e: Entry) {
  * play_start, but if the provider limit is only reached because of our own sessions that are
  * already on their way out (released, inside the grace period), stop those first and try once more.
  */
-async function startFreeingIdle(target: PlayTarget): Promise<PlayStarted> {
+async function startFreeingIdle(target: PlayTarget, opts: StartOptions): Promise<PlayStarted> {
   try {
-    return await api.playStart(target);
+    return await api.playStart(target, opts);
   } catch (err) {
     if (!isConnectionLimit(err)) throw err;
     const ids = new Set(limitDetails(err).sessions.map((s) => s.id));
@@ -38,8 +38,13 @@ async function startFreeingIdle(target: PlayTarget): Promise<PlayStarted> {
       entries.delete(e.key);
       await api.playStop(e.started!.sessionId).catch(() => undefined);
     }
-    return api.playStart(target);
+    return api.playStart(target, opts);
   }
+}
+
+export interface StartOptions {
+  /** The user chose to try although the provider says its streams are in use elsewhere. */
+  ignoreProviderCount?: boolean;
 }
 
 export interface Lease {
@@ -47,7 +52,7 @@ export interface Lease {
   release: () => void;
 }
 
-export function acquire(target: PlayTarget): Lease {
+export function acquire(target: PlayTarget, opts: StartOptions = {}): Lease {
   const key = targetKey(target);
   let e = entries.get(key);
   if (e) {
@@ -57,7 +62,7 @@ export function acquire(target: PlayTarget): Lease {
     }
   } else {
     const entry: Entry = { key, refs: 0, started: null, stopTimer: null, promise: Promise.resolve(null as unknown as PlayStarted) };
-    entry.promise = startFreeingIdle(target).then(
+    entry.promise = startFreeingIdle(target, opts).then(
       (s) => {
         entry.started = s;
         return s;

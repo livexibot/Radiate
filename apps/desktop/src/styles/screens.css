@@ -65,6 +65,7 @@
 .chrow-num { width: 2.2rem; font-size: 0.8rem; color: var(--mute); flex: none; }
 .chrow-main { flex: 1; min-width: 0; display: grid; gap: 0.18rem; }
 .chrow-main b { font-size: 0.95rem; }
+.chrow-group { color: var(--mute); font-weight: 600; font-size: 0.85rem; }
 .chrow-main > span { font-size: 0.8rem; color: var(--mute); }
 .chrow-bar { height: 3px; width: min(12rem, 70%); margin-top: 0.15rem; }
 .chrow-next { flex: none; max-width: 38%; font-size: 0.8rem; color: var(--mute); text-align: right; }
@@ -212,7 +213,10 @@
 .search-chips { margin-bottom: 1.4rem; }
 .results { display: grid; gap: 1.6rem; max-width: 60rem; }
 .results > .skel { margin-bottom: -1.1rem; }
-.res-sec h2 { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--mute); font-weight: 800; margin-bottom: 0.6rem; }
+.res-head { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 0.6rem; }
+.res-sec h2 { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--mute); font-weight: 800; }
+.res-more { background: none; border: 0; padding: 0; color: var(--acc); font: inherit; font-size: 0.82rem; font-weight: 700; cursor: pointer; }
+.res-more:hover, .res-more:focus-visible { text-decoration: underline; }
 .res-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); gap: 0.5rem; }
 .res { display: flex; align-items: center; gap: 0.8rem; padding: 0.6rem 0.8rem; border-radius: 0.8rem; background: var(--s1); border: 0; text-align: left; min-width: 0; }
 .res:hover { background: var(--s2); }

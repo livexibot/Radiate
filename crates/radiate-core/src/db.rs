@@ -8,7 +8,8 @@ use rusqlite::Connection;
 use crate::Result;
 
 /// Migrations in order; `PRAGMA user_version` records how many have run.
-const MIGRATIONS: &[&str] = &[r#"
+const MIGRATIONS: &[&str] = &[
+    r#"
 CREATE TABLE sources (
     id                   TEXT PRIMARY KEY,
     name                 TEXT NOT NULL,
@@ -184,7 +185,20 @@ CREATE TABLE kv (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-"#];
+"#,
+    // 0.2.1: names are searched by substring on a folded key (see text.rs);
+    // word-prefix search missed "SkySports" for "sky sports" and "ESPN2" for
+    // "espn 2". The keys are filled in by `fill_search_keys`.
+    r#"
+ALTER TABLE channels ADD COLUMN search_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE vod ADD COLUMN search_key TEXT NOT NULL DEFAULT '';
+DROP TABLE channels_fts;
+DROP TABLE vod_fts;
+"#,
+];
+
+/// The migration that added `search_key`.
+const SEARCH_KEYS: usize = 1;
 
 /// Opens (creating if needed) the database at `path` and brings the schema
 /// up to date.
@@ -208,8 +222,24 @@ fn migrate(conn: &mut Connection) -> Result<()> {
     for (i, sql) in MIGRATIONS.iter().enumerate().skip(version as usize) {
         let tx = conn.transaction()?;
         tx.execute_batch(sql)?;
+        if i == SEARCH_KEYS {
+            fill_search_keys(&tx, "channels")?;
+            fill_search_keys(&tx, "vod")?;
+        }
         tx.pragma_update(None, "user_version", i as u32 + 1)?;
         tx.commit()?;
+    }
+    Ok(())
+}
+
+fn fill_search_keys(conn: &Connection, table: &str) -> Result<()> {
+    let rows: Vec<(i64, String)> = conn
+        .prepare(&format!("SELECT pk, name FROM {table}"))?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut update = conn.prepare(&format!("UPDATE {table} SET search_key = ?2 WHERE pk = ?1"))?;
+    for (pk, name) in rows {
+        update.execute(rusqlite::params![pk, crate::text::search_key(&name)])?;
     }
     Ok(())
 }
@@ -232,5 +262,38 @@ mod tests {
             .query_row("PRAGMA journal_mode", [], |r| r.get(0))
             .unwrap();
         assert_eq!(mode, "wal");
+    }
+
+    #[test]
+    fn fills_search_keys_for_an_older_library() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("radiate.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(MIGRATIONS[0]).unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+            conn.execute_batch(
+                "INSERT INTO channels (id, source_id, position, number, name, group_id, stream) \
+                 VALUES ('s:1', 's', 0, 1, 'UK| SkySports Main Event', 'g', 'u');
+                 INSERT INTO vod (id, source_id, kind, position, name, group_id) \
+                 VALUES ('s:m:1', 's', 'movie', 0, 'Spider-Man', 'g');",
+            )
+            .unwrap();
+        }
+        let conn = open(&path).unwrap();
+        let key = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, String>(0)).unwrap();
+        assert_eq!(
+            key("SELECT search_key FROM channels"),
+            " uk skysports main event "
+        );
+        assert_eq!(key("SELECT search_key FROM vod"), " spider man ");
+        let fts: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('channels_fts', 'vod_fts')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts, 0);
     }
 }

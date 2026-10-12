@@ -42,7 +42,14 @@ export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
   }, [picked, hasFavorites, groups, sportsGroups]);
   const sel = picked ?? auto ?? { groupId: null, favorites: false };
   const deciding = !picked && !auto;
-  const list = usePagedChannels({ groupId: sel.groupId, favoritesOnly: sel.favorites, search, paused: deciding });
+  // typing searches every channel, not just the open group
+  const everywhere = search !== "";
+  const list = usePagedChannels({
+    groupId: everywhere ? null : sel.groupId,
+    favoritesOnly: everywhere ? false : sel.favorites,
+    search,
+    paused: deciding && !everywhere,
+  });
   const [focused, setFocused] = useState(0);
   const [range, setRange] = useState<[number, number]>([0, 0]);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -76,7 +83,7 @@ export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
   const current = list.get(focused) ?? null;
   const previewId = useDebounced(current?.id ?? null, 650);
 
-  const ctx = { groupId: sel.favorites ? null : sel.groupId, favoritesOnly: sel.favorites };
+  const ctx = everywhere ? { groupId: null, favoritesOnly: false } : { groupId: sel.favorites ? null : sel.groupId, favoritesOnly: sel.favorites };
   const play = (c: Channel) => navigate({ name: "player", target: { type: "channel", id: c.id }, ctx });
 
   const multiSource = (sources?.length ?? 0) > 1;
@@ -118,7 +125,7 @@ export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
         <h1>Live TV</h1>
         <label className="search-mini">
           <Icon name="search" />
-          <input className="input" placeholder="Filter channels" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter channels" />
+          <input className="input" placeholder="Search all channels" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Search all channels" spellCheck={false} />
         </label>
       </header>
       <div className="live-grid">
@@ -150,7 +157,7 @@ export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
         </nav>
 
         <div className="chlist" ref={listRef}>
-          {list.total === null || deciding ? (
+          {list.total === null || (deciding && !everywhere) ? (
             <div className="chlist-skel">
               {Array.from({ length: 9 }, (_, i) => (
                 <div className="chrow" key={i}>
@@ -164,7 +171,7 @@ export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
               ))}
             </div>
           ) : list.total === 0 ? (
-            <Empty icon={sel.favorites ? "star" : "live"} title={sel.favorites ? "No favorites yet" : search ? "No matching channels" : "No channels in this group"} />
+            <Empty icon={everywhere ? "search" : sel.favorites ? "star" : "live"} title={everywhere ? `No channels match "${search}"` : sel.favorites ? "No favorites yet" : "No channels in this group"} />
           ) : (
             <VirtualList
               count={list.total}
@@ -205,6 +212,7 @@ export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
                       <b className="ellipsis">
                         {c.name}
                         {c.favorite ? <span className="star-inline" aria-label="Favorite"> ★</span> : null}
+                        {everywhere ? <span className="chrow-group"> · {c.groupName}</span> : null}
                       </b>
                       <span className="ellipsis">{n?.now ? n.now.title : c.epgChannelId ? " " : "No guide"}</span>
                       {n?.now ? <Progress value={progressOf(n.now.start, n.now.stop, now)} className="chrow-bar" /> : null}

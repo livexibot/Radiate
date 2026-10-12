@@ -2,31 +2,51 @@
 
 use std::collections::HashSet;
 
-use rusqlite::{params, Connection};
+use rusqlite::types::Value as SqlValue;
+use rusqlite::{params, params_from_iter, Connection};
 
 use super::library::{channel_row, vod_row, CHANNEL_COLS, VISIBLE, VOD_COLS};
 use super::{fts_query, now_ms, Core};
+use crate::text::TextQuery;
 use crate::types::{Channel, ContentKind, Programme, SearchResults, VodItem};
 use crate::Result;
 
 impl Core {
-    /// Searches everything. `live_now` holds programmes on air now whose
-    /// title matches; `upcoming` those starting in the next 24 hours.
+    /// Searches everything. Channels, movies and series match by name (see
+    /// [`TextQuery`]); `live_now` holds programmes on air now whose title
+    /// matches, `upcoming` those starting in the next 24 hours.
     pub fn search(&self, query: &str, limit_per_kind: u32) -> Result<SearchResults> {
-        let Some(fts) = fts_query(query) else {
+        let Some(text) = TextQuery::parse(query) else {
             return Ok(SearchResults::default());
         };
         let limit = i64::from(limit_per_kind.max(1));
         let conn = self.conn();
         let now = now_ms();
+        let mut args = Vec::new();
+        let filter = text.filter("c.search_key", &mut args);
+        let rank = text.rank("c.search_key", &mut args);
+        args.push(limit.into());
         let mut stmt = conn.prepare(&format!(
-            "SELECT {CHANNEL_COLS} FROM channels_fts f JOIN channels c ON c.pk = f.rowid \
-             JOIN groups g ON g.id = c.group_id \
-             WHERE channels_fts MATCH ?1 AND {VISIBLE} ORDER BY f.rank, c.number LIMIT ?2"
+            "SELECT {CHANNEL_COLS} FROM channels c JOIN groups g ON g.id = c.group_id \
+             WHERE {filter} AND {VISIBLE} \
+             ORDER BY {rank}, c.favorite DESC, length(c.name), c.number LIMIT ?{}",
+            args.len()
         ))?;
         let channels = stmt
-            .query_map(params![fts, limit], channel_row)?
+            .query_map(params_from_iter(&args), channel_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        let movies = vod_hits(&conn, &text, ContentKind::Movie, limit)?;
+        let series = vod_hits(&conn, &text, ContentKind::Series, limit)?;
+        // Programme titles keep word-prefix search: the guide is too big to
+        // scan by substring.
+        let Some(fts) = fts_query(query) else {
+            return Ok(SearchResults {
+                channels,
+                movies,
+                series,
+                ..SearchResults::default()
+            });
+        };
         let live_now = programme_hits(
             &conn,
             &fts,
@@ -45,8 +65,8 @@ impl Core {
             channels,
             live_now,
             upcoming,
-            movies: vod_hits(&conn, &fts, ContentKind::Movie, limit)?,
-            series: vod_hits(&conn, &fts, ContentKind::Series, limit)?,
+            movies,
+            series,
         })
     }
 }
@@ -97,14 +117,23 @@ fn programme_hits(
     Ok(out)
 }
 
-fn vod_hits(conn: &Connection, fts: &str, kind: ContentKind, limit: i64) -> Result<Vec<VodItem>> {
+fn vod_hits(
+    conn: &Connection,
+    text: &TextQuery,
+    kind: ContentKind,
+    limit: i64,
+) -> Result<Vec<VodItem>> {
+    let mut args: Vec<SqlValue> = vec![kind.as_str().to_string().into(), limit.into()];
+    let filter = text.filter("v.search_key", &mut args);
+    let rank = text.rank("v.search_key", &mut args);
     let mut stmt = conn.prepare(&format!(
-        "SELECT {VOD_COLS} FROM vod_fts f JOIN vod v ON v.pk = f.rowid JOIN groups g ON g.id = v.group_id \
+        "SELECT {VOD_COLS} FROM vod v JOIN groups g ON g.id = v.group_id \
          LEFT JOIN progress p ON p.item_id = v.id \
-         WHERE vod_fts MATCH ?1 AND v.kind = ?2 AND g.hidden = 0 ORDER BY f.rank LIMIT ?3"
+         WHERE v.kind = ?1 AND g.hidden = 0 AND {filter} \
+         ORDER BY {rank}, length(v.name), v.pk LIMIT ?2"
     ))?;
     let items = stmt
-        .query_map(params![fts, kind.as_str(), limit], vod_row)?
+        .query_map(params_from_iter(&args), vod_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(items)
 }

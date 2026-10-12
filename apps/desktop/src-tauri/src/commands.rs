@@ -311,10 +311,14 @@ fn map_kind(k: radiate_core::StreamKind) -> StreamKind {
 /// Resolve a target and open a relay session for it. Every playback (the
 /// webview player, each multiview tile, mpv) goes through here, so each one
 /// counts against the source's connection limit.
+/// `ignore_provider_count`: the user asked to try even though the provider
+/// says its streams are in use elsewhere. Our own sessions still never go
+/// over the limit, and the provider still decides whether to serve it.
 async fn open_session(
     app: &AppHandle,
     state: &AppState,
     target: PlayTarget,
+    ignore_provider_count: bool,
 ) -> CmdResult<PlayStarted> {
     let rs = blocking(&state.core, move |c| c.resolve(&target)).await?;
     let source_id = rs.source_id.clone();
@@ -323,16 +327,16 @@ async fn open_session(
         .iter()
         .any(|s| s.id == source_id && matches!(s.kind, SourceKind::Xtream));
 
-    // The provider's own count includes our sessions; only the rest are
+    // The provider's own count, ours included; the hub works out which are
     // other devices.
-    let external_in_use = if is_xtream && rs.limit.is_some() {
+    let provider_in_use = if is_xtream && rs.limit.is_some() && !ignore_provider_count {
         match tokio::time::timeout(
             Duration::from_secs(4),
             state.core.xtream_active_connections(&rs.source_id),
         )
         .await
         {
-            Ok(Ok(Some(active))) => Some(active.saturating_sub(state.hub.in_use(&rs.source_id))),
+            Ok(Ok(active)) => active,
             _ => None,
         }
     } else {
@@ -346,7 +350,7 @@ async fn open_session(
         headers: rs.headers,
         kind_hint: map_kind(rs.kind_hint),
         limit: rs.limit,
-        external_in_use,
+        provider_in_use,
         title: rs.title,
     });
     let session = match opened {
@@ -356,8 +360,11 @@ async fn open_session(
             limit,
             in_use,
             sessions,
+            external,
         }) => {
-            let message = if limit == 1 {
+            let message = if sessions.is_empty() {
+                "Your provider says its streams are in use on another device or app. If you just stopped watching somewhere, it frees up within a minute or two.".to_string()
+            } else if limit == 1 {
                 "This provider allows one stream at a time, and it is in use. Stop the other stream to watch this one.".to_string()
             } else {
                 format!("All {limit} connections this provider allows are in use. Stop another stream to watch this one.")
@@ -366,7 +373,8 @@ async fn open_session(
                 .with("sourceId", source_id)
                 .with("limit", limit)
                 .with("inUse", in_use)
-                .with("sessions", sessions));
+                .with("sessions", sessions)
+                .with("external", external));
         }
         Err(e @ OpenError::InvalidUrl { .. }) => {
             return Err(CmdError::new("invalid", e.to_string()));
@@ -399,8 +407,9 @@ pub async fn play_start(
     app: AppHandle,
     state: State<'_, AppState>,
     target: PlayTarget,
+    ignore_provider_count: Option<bool>,
 ) -> CmdResult<PlayStarted> {
-    open_session(&app, &state, target).await
+    open_session(&app, &state, target, ignore_provider_count.unwrap_or(false)).await
 }
 
 #[tauri::command]
@@ -438,7 +447,7 @@ pub async fn mpv_open(
     else {
         return Err(CmdError::new("mpv_missing", "mpv isn't installed."));
     };
-    let started = open_session(&app, &state, target).await?;
+    let started = open_session(&app, &state, target, false).await?;
     let id = started.session_id.clone();
 
     let mut cmd = tokio::process::Command::new(&mpv);

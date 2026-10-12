@@ -14,7 +14,10 @@ like a real one, on Linux under Xvfb. Nothing here ships.
   ahead needs a range request. It enforces the connection limit like a strict
   provider (one more connection is refused with 403) and reports in-use, the
   peak and every refusal at `/_stats`. `--freeze-live-after` and
-  `--drop-live-after` make live streams stall or drop.
+  `--drop-live-after` make live streams stall or drop. `--report-lag N` keeps
+  a closed connection in `active_cons` for N seconds, like a panel that is
+  slow to notice, and `/_phantom?n=N` reports N more connections ("another
+  device") without taking room for them.
 - `drive.py` drives the app with `tauri-driver` + `WebKitWebDriver` and runs
   checks that print what they saw (positions after seeks, durations,
   connections in use at the app and at the provider).
@@ -38,8 +41,13 @@ Left / Right, space, Up / Down don't zap, paused 20 s with no failure card,
 progress saved on stop), `resume`, `hlsvod`, `mkv` (the mpv card), `series`
 (episode, "Next episode", cancel, auto-advance, continue watching), `live`
 (live format preference, preview to full player, smooth MPEG-TS, zapping
-within the limit, stable latency), `stall` (a frozen live picture becomes the
-failure card). `source` must run first in a fresh app; without a system
+within the limit, stable latency), `search` (names written together or with
+country tags and superscript letters are found; the Live box searches every
+group), `reactor` (the YouTube box, its menu and holding the match back),
+`limit` (a one-stream account whose count lags: zapping never shows the
+limit card; a stream reported on another device does, the card checks again
+by itself, and Play anyway asks the provider), `stall` (a frozen live picture
+becomes the failure card). `source` must run first in a fresh app; without a system
 keyring the password lives in memory, so start with `up --fresh` after each
 `down`.
 

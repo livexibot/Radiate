@@ -11,6 +11,8 @@ Standard library only (ffmpeg is used for the live streams). Serves:
   /movie/U/P/ID.EXT   mp4 (faststart and moov-at-end), mkv, and an HLS VOD
   /series/U/P/ID.mp4  episodes
   /_stats             JSON: connections in use now, the peak, refusals, recent media requests
+  /_phantom?n=N       report N more connections in active_cons ("another device"), without
+                      taking room for them
 
 Files honour HTTP Range (206 with Content-Range) and are sent at a capped rate
 (--vod-rate), so a player has to ask for ranges to seek far ahead.
@@ -19,6 +21,8 @@ The connection limit is enforced like a strict provider: a TCP connection that
 asks for media counts until it closes; one more than --max is refused with 403
 (after a short grace for a connection that is just closing). Every refusal and
 the peak are reported, so a run can prove the app never went over the limit.
+With --report-lag, user_info's active_cons keeps counting a closed connection
+for that many seconds, like a panel that is slow to notice.
 
 Media comes from scripts/e2e/gen_media.sh.
 """
@@ -44,6 +48,8 @@ from urllib.parse import parse_qs, urlsplit
 ARGS: argparse.Namespace
 LOCK = threading.Lock()
 MEDIA_CONNS: dict[int, dict] = {}  # id(handler) -> info, for connections that asked for media
+CLOSED_AT: list[float] = []  # when media connections closed, for --report-lag
+PHANTOM = {"n": 0}
 STATS = {"peak": 0, "refused": [], "requests": [], "api_calls": 0}
 CHILDREN: list[subprocess.Popen] = []
 
@@ -53,6 +59,8 @@ LIVE = [
     (102, "Arena Sports 2", "1", "live_b.ts", "arena2.example"),
     (103, "Field Sports HD", "1", "live_a.ts", "field.example"),
     (104, "Harbor News", "2", "live_b.ts", "harbor.example"),
+    # run together, with a country tag and superscript letters, as many providers write them
+    (105, "UK| ARENASPORTS 3 ᴴᴰ", "1", "live_b.ts", "arena3.example"),
 ]
 LIVE_CATS = [("1", "Sports"), ("2", "News")]
 VOD_CATS = [("10", "Action"), ("11", "Drama")]
@@ -87,6 +95,21 @@ def media_count() -> int:
         return len(MEDIA_CONNS)
 
 
+def media_closed() -> None:
+    """Note a media connection that just closed. Call with LOCK held."""
+    now = time.time()
+    CLOSED_AT.append(now)
+    CLOSED_AT[:] = [t for t in CLOSED_AT if now - t < max(ARGS.report_lag, 1)]
+
+
+def reported_count() -> int:
+    """active_cons as the account API reports it: lagging and with phantoms."""
+    now = time.time()
+    with LOCK:
+        lagging = sum(1 for t in CLOSED_AT if now - t < ARGS.report_lag)
+        return len(MEDIA_CONNS) + lagging + PHANTOM["n"]
+
+
 # ---------------------------------------------------------------------------
 # Live HLS: one ffmpeg writes a sliding window for every HLS viewer.
 
@@ -118,7 +141,7 @@ def user_info() -> dict:
             "status": "Active",
             "exp_date": str(int(time.time()) + 90 * 86400),
             "is_trial": "0",
-            "active_cons": str(media_count()),
+            "active_cons": str(reported_count()),
             "created_at": "1700000000",
             "max_connections": str(ARGS.max),
             "allowed_output_formats": ARGS.formats.split(","),
@@ -228,6 +251,8 @@ class Handler(BaseHTTPRequestHandler):
     def finish(self) -> None:
         with LOCK:
             info = MEDIA_CONNS.pop(id(self), None)
+            if info:
+                media_closed()
         if info:
             log(f"media connection closed :{self.client_address[1]} (in use {media_count()})")
         try:
@@ -288,6 +313,8 @@ class Handler(BaseHTTPRequestHandler):
                 break
         with LOCK:
             gone = MEDIA_CONNS.pop(id(self), None)
+            if gone:
+                media_closed()
         if gone:
             log(f"media connection closed by the viewer :{self.client_address[1]} (in use {media_count()})")
 
@@ -315,9 +342,14 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path
         try:
             if path == "/_stats":
+                reported = reported_count()
                 with LOCK:
-                    body = json.dumps({"inUse": len(MEDIA_CONNS), **STATS}).encode()
+                    body = json.dumps({"inUse": len(MEDIA_CONNS), "reported": reported, **STATS}).encode()
                 return self.send_bytes(200, body, "application/json")
+            if path == "/_phantom":
+                PHANTOM["n"] = int((q.get("n") or ["0"])[0])
+                log(f"phantom connections reported: {PHANTOM['n']}")
+                return self.send_bytes(200, b"{}", "application/json")
             if path == "/player_api.php":
                 STATS["api_calls"] += 1
                 if not self.creds_ok((q.get("username") or [""])[0], (q.get("password") or [""])[0]):
@@ -508,6 +540,7 @@ def main() -> None:
     p.add_argument("--formats", default="m3u8,ts", help="allowed_output_formats, comma separated")
     p.add_argument("--vod-rate", type=float, default=400.0, help="KB/s cap for files (0 = no cap)")
     p.add_argument("--grace", type=float, default=1.5, help="seconds to wait for a closing connection before refusing")
+    p.add_argument("--report-lag", type=float, default=0, help="seconds active_cons keeps counting a closed connection")
     p.add_argument("--drop-live-after", type=int, default=0, help="close each live TS connection after this many bytes (reconnect tests)")
     p.add_argument("--freeze-live-after", type=int, default=0, help="stop sending on each live TS connection after this many bytes, keeping it open (stall tests)")
     ARGS = p.parse_args()

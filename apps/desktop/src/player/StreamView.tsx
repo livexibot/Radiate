@@ -22,7 +22,7 @@ export function StreamView({ target, backdrop, muted, compact, className = "", c
   const { prefs } = useApp();
   const [fatal, setFatal] = useState<FatalInfo | null>(null);
   const [mpvSession, setMpvSession] = useState<string | null>(null);
-  const { state, retry, fail } = useStream(mpvSession ? null : target);
+  const { state, retry, tryAnyway, fail } = useStream(mpvSession ? null : target);
   const [key, setKey] = useState("");
   const tkey = target ? `${target.type}:${target.id}` : "";
   if (key !== tkey) {
@@ -41,7 +41,7 @@ export function StreamView({ target, backdrop, muted, compact, className = "", c
         }}
       />
     );
-  } else if (state.status === "limit") body = <LimitCard info={state.limit} onFreed={() => void retry()} compact={compact} />;
+  } else if (state.status === "limit") body = <LimitCard info={state.limit} onFreed={() => void retry()} onTryAnyway={() => void tryAnyway()} compact={compact} />;
   else if (state.status === "failed") body = <FailCard message={state.message} onRetry={() => void retry()} compact={compact} />;
   else if (fatal && target) body = <UnsupportedCard target={target} message={fatal.message} onMpv={setMpvSession} onBeforeOpen={() => restart(target)} compact={compact} />;
 

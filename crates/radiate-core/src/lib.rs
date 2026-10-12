@@ -8,6 +8,7 @@ mod fetch;
 pub mod m3u;
 mod matching;
 mod secrets;
+mod text;
 mod types;
 pub mod xmltv;
 pub mod xtream;

@@ -9,7 +9,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use bytes::Bytes;
-use radiate_stream::{HubConfig, OpenError, OpenRequest, StreamEvent, StreamHub, StreamKind};
+use radiate_stream::{
+    HubConfig, OpenError, OpenRequest, RecentClose, StreamEvent, StreamHub, StreamKind,
+};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -241,7 +243,7 @@ fn req(source: &str, url: String, limit: Option<u32>) -> OpenRequest {
         headers: vec![],
         kind_hint: StreamKind::Unknown,
         limit,
-        external_in_use: None,
+        provider_in_use: None,
         title: "Test".into(),
     }
 }
@@ -270,10 +272,11 @@ async fn refuses_at_limit_and_releases_after_close() {
             limit,
             in_use,
             sessions,
+            external,
         }) => {
             assert_eq!(
-                (source_id.as_str(), limit, in_use, sessions.len()),
-                ("s1", 2, 2, 2)
+                (source_id.as_str(), limit, in_use, sessions.len(), external),
+                ("s1", 2, 2, 2, 0)
             );
         }
         other => panic!("expected refusal, got {other:?}"),
@@ -299,17 +302,105 @@ async fn refuses_at_limit_and_releases_after_close() {
     }
 }
 
+fn reported(r: &OpenRequest, n: u32) -> OpenRequest {
+    OpenRequest {
+        provider_in_use: Some(n),
+        ..r.clone()
+    }
+}
+
+/// Open a session and have the player read from it, so the provider sees it.
+async fn watch(hub: &StreamHub, r: OpenRequest) -> String {
+    let s = hub.open(r).unwrap();
+    let mut resp = client().get(&s.local_url).send().await.unwrap();
+    assert!(resp.chunk().await.unwrap().is_some());
+    s.id
+}
+
 #[tokio::test]
 async fn counts_other_devices() {
     let (base, _) = upstream().await;
     let hub = StreamHub::start_with(cfg()).await.unwrap();
-    let mut r = req("s1", format!("{base}/live.ts"), Some(2));
-    r.external_in_use = Some(1);
-    hub.open(r.clone()).unwrap();
-    match hub.open(r) {
-        Err(OpenError::ConnectionLimit { in_use, .. }) => assert_eq!(in_use, 2),
+    let r = req("s1", format!("{base}/live.ts"), Some(2));
+    // One stream on another device.
+    hub.open(reported(&r, 1)).unwrap();
+    // The provider now counts ours too.
+    match hub.open(reported(&r, 2)) {
+        Err(OpenError::ConnectionLimit {
+            in_use,
+            sessions,
+            external,
+            ..
+        }) => assert_eq!((in_use, sessions.len(), external), (2, 1, 1)),
         other => panic!("expected refusal, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn streams_we_just_closed_are_not_other_devices() {
+    let (base, _) = upstream().await;
+    let hub = StreamHub::start_with(HubConfig {
+        recent_close_window: Duration::from_millis(800),
+        ..cfg()
+    })
+    .await
+    .unwrap();
+    let r = req("s1", format!("{base}/live.ts"), Some(1));
+
+    // A session the provider never saw doesn't explain its count.
+    let unseen = hub.open(r.clone()).unwrap();
+    hub.close(&unseen.id);
+    match hub.open(reported(&r, 1)) {
+        Err(OpenError::ConnectionLimit {
+            in_use,
+            sessions,
+            external,
+            ..
+        }) => assert_eq!((in_use, sessions.len(), external), (1, 0, 1)),
+        other => panic!("expected refusal, got {other:?}"),
+    }
+
+    // Zapping: the provider still counts the streams we just closed.
+    let first = watch(&hub, r.clone()).await;
+    hub.close(&first);
+    let second = watch(&hub, reported(&r, 1)).await;
+    hub.close(&second);
+    let third = watch(&hub, reported(&r, 2)).await;
+    hub.close(&third);
+    assert_eq!(hub.recent_closes().len(), 3);
+    match hub.open(reported(&r, 4)) {
+        Err(OpenError::ConnectionLimit { external, .. }) => assert_eq!(external, 1),
+        other => panic!("expected refusal, got {other:?}"),
+    }
+
+    // Once the window has passed, the provider's count is believed again.
+    tokio::time::sleep(Duration::from_millis(900)).await;
+    assert!(hub.recent_closes().is_empty());
+    assert!(matches!(
+        hub.open(reported(&r, 1)),
+        Err(OpenError::ConnectionLimit { external: 1, .. })
+    ));
+}
+
+#[tokio::test]
+async fn recent_closes_survive_a_restart() {
+    let (base, _) = upstream().await;
+    let r = req("s1", format!("{base}/live.ts"), Some(1));
+    let before = StreamHub::start_with(cfg()).await.unwrap();
+    let id = watch(&before, r.clone()).await;
+    before.shutdown();
+    let saved = before.recent_closes();
+    assert_eq!(saved.len(), 1);
+    assert_ne!(id, "");
+
+    let after = StreamHub::start_with(cfg()).await.unwrap();
+    let stale = RecentClose {
+        source_id: "s1".into(),
+        closed_at: saved[0].closed_at - 3_600_000,
+    };
+    after.remember_closes(vec![stale, saved[0].clone()]);
+    assert_eq!(after.recent_closes(), saved);
+    assert!(after.open(reported(&r, 1)).is_ok());
 }
 
 #[tokio::test]
@@ -747,9 +838,10 @@ fn json_shapes() {
         limit: 1,
         in_use: 1,
         sessions: vec![],
+        external: 1,
     };
     assert_eq!(
         serde_json::to_value(&err).unwrap(),
-        serde_json::json!({"code": "connection_limit", "sourceId": "s", "limit": 1, "inUse": 1, "sessions": []})
+        serde_json::json!({"code": "connection_limit", "sourceId": "s", "limit": 1, "inUse": 1, "sessions": [], "external": 1})
     );
 }

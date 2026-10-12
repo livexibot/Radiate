@@ -10,6 +10,12 @@
 //!   sessions;
 //! - [`StreamHub::open`] refuses when the source already has `limit` sessions
 //!   open (plus the provider's count of other devices). Nothing is queued;
+//! - providers are slow to notice a closed connection, so their count still
+//!   includes streams this app closed a moment ago. Those are not other
+//!   devices: sessions closed within [`HubConfig::recent_close_window`] are
+//!   taken off the provider's count. This only decides whether to ask the
+//!   provider; our own sessions never go over the limit, and the provider
+//!   still refuses a stream it has no room for;
 //! - a session closes on [`StreamHub::close`], or after the idle timeout
 //!   (20 s by default) with no player request and no player connection open;
 //! - a live MPEG-TS stream that drops is reconnected quietly up to three
@@ -29,7 +35,7 @@ mod hls;
 mod relay;
 mod sniff;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -68,8 +74,9 @@ pub struct OpenRequest {
     pub kind_hint: StreamKind,
     /// The provider's connection limit. `None` means unknown and not enforced.
     pub limit: Option<u32>,
-    /// Connections the provider reports for other devices.
-    pub external_in_use: Option<u32>,
+    /// Connections the provider itself reports for this account, ours
+    /// included. `None` when the provider doesn't say.
+    pub provider_in_use: Option<u32>,
     pub title: String,
 }
 
@@ -111,10 +118,23 @@ pub enum OpenError {
         source_id: String,
         limit: u32,
         in_use: u32,
+        /// Our open sessions for the source, oldest first.
         sessions: Vec<SessionInfo>,
+        /// Connections the provider counts that aren't ours.
+        external: u32,
     },
     #[error("That stream address can't be played.")]
     InvalidUrl { upstream_url: String },
+}
+
+/// A session this app closed, remembered for a while because the provider
+/// keeps counting it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentClose {
+    pub source_id: String,
+    /// Unix time in milliseconds.
+    pub closed_at: i64,
 }
 
 /// Why [`StreamHub::probe`] couldn't open the stream.
@@ -178,6 +198,8 @@ pub struct HubConfig {
     pub permit_wait: Duration,
     /// Waiting on the provider this long counts as stalled.
     pub stall_after: Duration,
+    /// How long a closed session may still be in the provider's count.
+    pub recent_close_window: Duration,
 }
 
 impl Default for HubConfig {
@@ -192,6 +214,7 @@ impl Default for HubConfig {
             read_timeout: Duration::from_secs(20),
             permit_wait: Duration::from_secs(30),
             stall_after: Duration::from_secs(4),
+            recent_close_window: Duration::from_secs(90),
         }
     }
 }
@@ -201,6 +224,8 @@ pub(crate) struct Inner {
     pub(crate) cfg: HubConfig,
     pub(crate) sessions: Mutex<HashMap<String, Arc<Session>>>,
     pub(crate) limits: Mutex<BTreeMap<String, Option<u32>>>,
+    /// Sessions that reached the provider and were closed, oldest first.
+    pub(crate) recent: Mutex<VecDeque<RecentClose>>,
     pub(crate) events: broadcast::Sender<StreamEvent>,
     pub(crate) shutdown: CancellationToken,
 }
@@ -218,10 +243,37 @@ impl Inner {
         let removed = self.sessions.lock().unwrap().remove(id);
         if let Some(s) = removed {
             s.shut();
+            if s.dialed() {
+                self.remember(RecentClose {
+                    source_id: s.source_id.clone(),
+                    closed_at: now_ms(),
+                });
+            }
             self.emit(StreamEvent::Closed {
                 session_id: id.to_string(),
             });
         }
+    }
+
+    fn remember(&self, close: RecentClose) {
+        let mut recent = self.recent.lock().unwrap();
+        recent.push_back(close);
+        recent.make_contiguous().sort_by_key(|c| c.closed_at);
+        self.prune(&mut recent);
+    }
+
+    fn prune(&self, recent: &mut VecDeque<RecentClose>) {
+        let since = now_ms() - self.cfg.recent_close_window.as_millis() as i64;
+        while recent.front().is_some_and(|c| c.closed_at < since) {
+            recent.pop_front();
+        }
+    }
+
+    /// Sessions for `source_id` closed within the window.
+    fn recently_closed(&self, source_id: &str) -> u32 {
+        let mut recent = self.recent.lock().unwrap();
+        self.prune(&mut recent);
+        recent.iter().filter(|c| c.source_id == source_id).count() as u32
     }
 }
 
@@ -250,6 +302,7 @@ impl StreamHub {
             cfg,
             sessions: Mutex::new(HashMap::new()),
             limits: Mutex::new(BTreeMap::new()),
+            recent: Mutex::new(VecDeque::new()),
             events,
             shutdown: CancellationToken::new(),
         });
@@ -284,7 +337,12 @@ impl StreamHub {
             .filter(|s| s.source_id == req.source_id)
             .map(|s| s.info())
             .collect();
-        let in_use = ours.len() as u32 + req.external_in_use.unwrap_or(0);
+        let ours_n = ours.len() as u32;
+        let external = req.provider_in_use.map_or(0, |reported| {
+            let lingering = self.inner.recently_closed(&req.source_id);
+            reported.saturating_sub(ours_n.saturating_add(lingering))
+        });
+        let in_use = ours_n + external;
         if let Some(limit) = req.limit {
             if in_use >= limit {
                 let mut ours = ours;
@@ -294,6 +352,7 @@ impl StreamHub {
                     limit,
                     in_use,
                     sessions: ours,
+                    external,
                 });
             }
         }
@@ -376,6 +435,25 @@ impl StreamHub {
                 limit: *limit,
             })
             .collect()
+    }
+
+    /// Sessions closed within the window, to keep across a restart: the
+    /// provider doesn't know the app restarted.
+    pub fn recent_closes(&self) -> Vec<RecentClose> {
+        let mut recent = self.inner.recent.lock().unwrap();
+        self.inner.prune(&mut recent);
+        recent.iter().cloned().collect()
+    }
+
+    /// Restore what [`StreamHub::recent_closes`] returned before a restart.
+    pub fn remember_closes(&self, closes: Vec<RecentClose>) {
+        let now = now_ms();
+        for c in closes {
+            // A clock that went backwards must not keep one forever.
+            if c.closed_at <= now {
+                self.inner.remember(c);
+            }
+        }
     }
 
     /// How many sessions this app has open for a source.

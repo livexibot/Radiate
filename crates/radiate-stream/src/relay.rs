@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
@@ -88,6 +88,8 @@ pub(crate) struct Session {
     bytes: AtomicU64,
     /// 0 = not waiting on the provider, else ms since `created` + 1.
     waiting_since: AtomicU64,
+    /// Whether a request has gone to the provider.
+    dialed: AtomicBool,
 }
 
 impl Session {
@@ -149,7 +151,13 @@ impl Session {
             active: AtomicUsize::new(0),
             bytes: AtomicU64::new(0),
             waiting_since: AtomicU64::new(0),
+            dialed: AtomicBool::new(false),
         }
+    }
+
+    /// Whether the provider has seen a connection from this session.
+    pub(crate) fn dialed(&self) -> bool {
+        self.dialed.load(Ordering::Relaxed)
     }
 
     pub(crate) fn info(&self) -> SessionInfo {
@@ -275,6 +283,7 @@ async fn fetch(
     if let Some(r) = range {
         req = req.header(header::RANGE, r.clone());
     }
+    s.dialed.store(true, Ordering::Relaxed);
     s.waiting(true);
     let sent = tokio::select! {
         _ = token.cancelled() => Err(FetchError::Cancelled),

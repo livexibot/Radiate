@@ -127,7 +127,7 @@ export const api = {
     call("progress_set", { itemId, positionSecs, durationSecs }),
   continueWatching: (limit: number) => call("continue_watching", { limit }),
   searchAll: (query: string, limit: number) => call("search_all", { query, limit }),
-  playStart: (target: PlayTarget) => call("play_start", { target }),
+  playStart: (target: PlayTarget, opts: { ignoreProviderCount?: boolean } = {}) => call("play_start", { target, ...opts }),
   playStop: (sessionId: string) => call("play_stop", { sessionId }),
   connectionsStatus: () => call("connections_status", undefined),
   prefsGet: () => call("prefs_get", undefined),

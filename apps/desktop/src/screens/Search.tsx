@@ -13,6 +13,11 @@ import { useDebounced, useNow } from "../state/hooks";
 
 type Filter = "all" | "channels" | "live" | "upcoming" | "movies" | "series";
 
+/** Results asked for per kind. Big IPTV lists have dozens of "Sky Sports" or "ESPN" channels. */
+const LIMIT = 200;
+/** Rows per kind under "All"; a kind's own chip shows every result. */
+const PREVIEW = 8;
+
 function Mark({ text, q }: { text: string; q: string }) {
   if (!q) return <>{text}</>;
   const i = text.toLowerCase().indexOf(q.toLowerCase());
@@ -44,7 +49,7 @@ export function Search({ initial }: { initial?: string }) {
     }
     let alive = true;
     setLoading(true);
-    api.searchAll(query, 12).then(
+    api.searchAll(query, LIMIT).then(
       (r) => {
         if (!alive) return;
         setRes(r);
@@ -66,14 +71,29 @@ export function Search({ initial }: { initial?: string }) {
   const show = (f: Filter) => filter === "all" || filter === f;
   const counts = res ? { channels: res.channels.length, live: res.liveNow.length, upcoming: res.upcoming.length, movies: res.movies.length, series: res.series.length } : null;
   const nothing = res && counts && Object.values(counts).every((n) => n === 0);
+  const count = (n: number | undefined) => (n === undefined ? "" : ` ${n}${n >= LIMIT ? "+" : ""}`);
+  /** Under "All", a few rows and a link to the rest. */
+  const cut = <T,>(items: T[], f: Filter): { rows: T[]; more?: { label: string; onClick: () => void } } =>
+    filter === "all" && items.length > PREVIEW
+      ? { rows: items.slice(0, PREVIEW), more: { label: `Show all${count(items.length)}`, onClick: () => setFilter(f) } }
+      : { rows: items };
+  const chosen = res
+    ? {
+        live: cut(res.liveNow, "live"),
+        channels: cut(res.channels, "channels"),
+        upcoming: cut(res.upcoming, "upcoming"),
+        movies: cut(res.movies, "movies"),
+        series: cut(res.series, "series"),
+      }
+    : null;
 
   const chips = [
     { id: "all", label: "All" },
-    { id: "channels", label: `Channels${counts ? ` ${counts.channels}` : ""}` },
-    { id: "live", label: `On now${counts ? ` ${counts.live}` : ""}` },
-    { id: "upcoming", label: `Upcoming${counts ? ` ${counts.upcoming}` : ""}` },
-    { id: "movies", label: `Movies${counts ? ` ${counts.movies}` : ""}` },
-    { id: "series", label: `Series${counts ? ` ${counts.series}` : ""}` },
+    { id: "channels", label: `Channels${count(counts?.channels)}` },
+    { id: "live", label: `On now${count(counts?.live)}` },
+    { id: "upcoming", label: `Upcoming${count(counts?.upcoming)}` },
+    { id: "movies", label: `Movies${count(counts?.movies)}` },
+    { id: "series", label: `Series${count(counts?.series)}` },
   ];
 
   return (
@@ -106,11 +126,11 @@ export function Search({ initial }: { initial?: string }) {
         </div>
       ) : nothing ? (
         <Empty icon="search" title={`Nothing matches "${query}"`} />
-      ) : res ? (
+      ) : res && chosen ? (
         <div className="results">
           {show("live") && res.liveNow.length > 0 ? (
-            <Section title="On now">
-              {res.liveNow.map(({ channel, programme }) => (
+            <Section title="On now" more={chosen.live.more}>
+              {chosen.live.rows.map(({ channel, programme }) => (
                 <button type="button" className="res" key={`${channel.id}${programme.start}`} onClick={() => playChannel(channel)}>
                   <Logo name={channel.name} src={channel.logo} />
                   <span className="res-main">
@@ -124,8 +144,8 @@ export function Search({ initial }: { initial?: string }) {
             </Section>
           ) : null}
           {show("channels") && res.channels.length > 0 ? (
-            <Section title="Channels">
-              {res.channels.map((c) => (
+            <Section title="Channels" more={chosen.channels.more}>
+              {chosen.channels.rows.map((c) => (
                 <button type="button" className="res" key={c.id} onClick={() => playChannel(c)}>
                   <Logo name={c.name} src={c.logo} />
                   <span className="res-main">
@@ -138,8 +158,8 @@ export function Search({ initial }: { initial?: string }) {
             </Section>
           ) : null}
           {show("upcoming") && res.upcoming.length > 0 ? (
-            <Section title="Upcoming">
-              {res.upcoming.map(({ channel, programme }) => (
+            <Section title="Upcoming" more={chosen.upcoming.more}>
+              {chosen.upcoming.rows.map(({ channel, programme }) => (
                 <button type="button" className="res" key={`${channel.id}${programme.start}`} onClick={() => playChannel(channel)}>
                   <Logo name={channel.name} src={channel.logo} />
                   <span className="res-main">
@@ -151,13 +171,13 @@ export function Search({ initial }: { initial?: string }) {
             </Section>
           ) : null}
           {show("movies") && res.movies.length > 0 ? (
-            <Section title="Movies">
-              {res.movies.map((v) => <VodRow key={v.id} v={v} q={query} onOpen={() => openVod(v)} />)}
+            <Section title="Movies" more={chosen.movies.more}>
+              {chosen.movies.rows.map((v) => <VodRow key={v.id} v={v} q={query} onOpen={() => openVod(v)} />)}
             </Section>
           ) : null}
           {show("series") && res.series.length > 0 ? (
-            <Section title="Series">
-              {res.series.map((v) => <VodRow key={v.id} v={v} q={query} onOpen={() => openVod(v)} />)}
+            <Section title="Series" more={chosen.series.more}>
+              {chosen.series.rows.map((v) => <VodRow key={v.id} v={v} q={query} onOpen={() => openVod(v)} />)}
             </Section>
           ) : null}
         </div>
@@ -166,10 +186,17 @@ export function Search({ initial }: { initial?: string }) {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, more, children }: { title: string; more?: { label: string; onClick: () => void }; children: React.ReactNode }) {
   return (
     <section className="res-sec">
-      <h2>{title}</h2>
+      <div className="res-head">
+        <h2>{title}</h2>
+        {more ? (
+          <button type="button" className="res-more" onClick={more.onClick}>
+            {more.label}
+          </button>
+        ) : null}
+      </div>
       <div className="res-list">{children}</div>
     </section>
   );

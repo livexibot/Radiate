@@ -11,6 +11,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use super::{guide, headers_json, load_source, load_sources, now_ms, stable_hash, Core, SourceRow};
 use crate::fetch::{self, GuideFile, Playlist};
 use crate::secrets::password_key;
+use crate::text::search_key;
 use crate::types::{
     ContentKind, NewSource, Progress, Source, SourceKind, SourcePatch, SourceStatus,
 };
@@ -206,7 +207,6 @@ impl Core {
             )?;
         }
         guide::drop_unused_guides(&tx)?;
-        rebuild_search(&tx)?;
         tx.commit()?;
         drop(conn);
         self.inner.secrets.delete(&password_key(id))?;
@@ -983,8 +983,8 @@ fn write_playlist(conn: &mut Connection, source_id: &str, rows: PlaylistRows) ->
             }
         }
         let mut insert = tx.prepare(
-            "INSERT INTO channels (id, source_id, position, number, name, logo, group_id, tvg_id, catchup_days, stream, headers) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO channels (id, source_id, position, number, name, logo, group_id, tvg_id, catchup_days, stream, headers, search_key) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         )?;
         for (i, c) in rows.channels.iter().enumerate() {
             insert.execute(params![
@@ -998,12 +998,13 @@ fn write_playlist(conn: &mut Connection, source_id: &str, rows: PlaylistRows) ->
                 c.tvg_id,
                 c.catchup_days,
                 c.stream,
-                c.headers
+                c.headers,
+                search_key(&c.name)
             ])?;
         }
         let mut insert = tx.prepare(
-            "INSERT OR IGNORE INTO vod (id, source_id, kind, position, name, poster, group_id, year, rating, plot, stream, headers) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT OR IGNORE INTO vod (id, source_id, kind, position, name, poster, group_id, year, rating, plot, stream, headers, search_key) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         )?;
         for (kind, list) in [
             (ContentKind::Movie, &rows.movies),
@@ -1022,7 +1023,8 @@ fn write_playlist(conn: &mut Connection, source_id: &str, rows: PlaylistRows) ->
                     v.rating,
                     v.plot,
                     v.stream,
-                    v.headers
+                    v.headers,
+                    search_key(&v.name)
                 ])?;
             }
         }
@@ -1032,7 +1034,6 @@ fn write_playlist(conn: &mut Connection, source_id: &str, rows: PlaylistRows) ->
         insert_episodes(&tx, source_id, episodes)?;
     }
     apply_user_state(&tx, Some(source_id))?;
-    rebuild_search(&tx)?;
     tx.execute(
         "UPDATE sources SET auto_epg_urls = ?2 WHERE id = ?1",
         params![source_id, serde_json::to_string(&rows.auto_epg_urls)?],
@@ -1045,15 +1046,6 @@ fn write_playlist(conn: &mut Connection, source_id: &str, rows: PlaylistRows) ->
     }
     tx.commit()?;
     conn.execute_batch("PRAGMA optimize")?;
-    Ok(())
-}
-
-/// Rebuilds the channel and VOD search indexes from their tables.
-pub(super) fn rebuild_search(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "INSERT INTO channels_fts(channels_fts) VALUES ('rebuild');
-         INSERT INTO vod_fts(vod_fts) VALUES ('rebuild');",
-    )?;
     Ok(())
 }
 

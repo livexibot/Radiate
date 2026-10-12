@@ -39,6 +39,7 @@ export function limitDetails(e: ApiError): Omit<ConnectionLimitError, "code" | "
     limit: typeof x.limit === "number" ? x.limit : 0,
     inUse: typeof x.inUse === "number" ? x.inUse : 0,
     sessions: Array.isArray(x.sessions) ? (x.sessions as SessionInfo[]) : [],
+    external: typeof x.external === "number" ? x.external : 0,
   };
 }
 

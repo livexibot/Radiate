@@ -271,7 +271,10 @@ export interface ConnectionLimitError extends ApiErrorShape {
   sourceId: string;
   limit: number;
   inUse: number;
+  /** Our open sessions for the source, oldest first. */
   sessions: SessionInfo[];
+  /** Streams the provider counts that aren't ours (another device or app). */
+  external: number;
 }
 
 export interface EventMap {
@@ -313,7 +316,7 @@ export interface Commands {
   progress_set: [{ itemId: string; positionSecs: number; durationSecs: number }, void];
   continue_watching: [{ limit: number }, VodItem[]];
   search_all: [{ query: string; limit: number }, SearchResults];
-  play_start: [{ target: PlayTarget }, PlayStarted];
+  play_start: [{ target: PlayTarget; ignoreProviderCount?: boolean }, PlayStarted];
   play_stop: [{ sessionId: string }, void];
   connections_status: [undefined, ConnectionUsage[]];
   prefs_get: [undefined, Prefs];

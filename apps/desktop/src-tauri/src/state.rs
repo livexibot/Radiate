@@ -1,13 +1,17 @@
 //! What the shell keeps while running.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use radiate_core::Core;
-use radiate_stream::StreamHub;
+use radiate_stream::{RecentClose, StreamHub};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
+
+/// Streams closed just before the app quit. The provider keeps counting them
+/// for a while, and an update restarts the app within seconds.
+const RECENT_STREAMS: &str = "recent-streams.json";
 
 pub struct AppState {
     pub core: Arc<Core>,
@@ -38,5 +42,22 @@ impl AppState {
             let _ = tx.send(());
         }
         self.hub.close_all();
+        let path = self.data_dir.join(RECENT_STREAMS);
+        let saved = serde_json::to_vec(&self.hub.recent_closes())
+            .map_err(std::io::Error::other)
+            .and_then(|bytes| std::fs::write(&path, bytes));
+        if let Err(e) = saved {
+            tracing::warn!("couldn't save recent streams: {e}");
+        }
+    }
+}
+
+/// Give a fresh hub the streams closed before the last quit.
+pub fn restore_recent_closes(hub: &StreamHub, data_dir: &Path) {
+    let Ok(bytes) = std::fs::read(data_dir.join(RECENT_STREAMS)) else {
+        return;
+    };
+    if let Ok(closes) = serde_json::from_slice::<Vec<RecentClose>>(&bytes) {
+        hub.remember_closes(closes);
     }
 }

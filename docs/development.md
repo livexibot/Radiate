@@ -30,6 +30,22 @@ page.
   user adds or shows a reactor. "Delay match" holds live TV back up to
   60 s so a reactor who is behind the feed lines up.
 
+## Decisions (12 October 2026, 0.2.1)
+
+- The connection limit stays enforced, but Radiate no longer takes the
+  provider's `active_cons` at its word right after a stream stops:
+  providers keep counting a closed stream for a while, so zapping on a
+  one-stream account showed "allows 1 stream at once" with nothing else
+  playing. Streams Radiate closed in the last 90 s (kept across a restart)
+  are taken off the provider's count. When the count still says another
+  device is watching, the card says so, checks again every 10 s for two
+  minutes, and offers Play anyway: the provider decides, and Radiate never
+  opens more than the limit itself. Multiview tiles don't offer it.
+- Search finds a name from any part of it, ignoring case, accents,
+  punctuation and spacing ("sky sports" finds "SKYSPORTS", "espn 2" finds
+  "ESPN2"), shows every match instead of the first 12, and the Live
+  screen's box searches every group, not only the open one.
+
 ## Layout
 
 ```

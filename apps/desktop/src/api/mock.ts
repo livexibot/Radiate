@@ -92,6 +92,21 @@ type Listener<E extends EventName> = (payload: EventMap[E]) => void;
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/** Folded words of a name as core keeps them: no case, accents or punctuation; letters and digits apart. */
+function foldWords(text: string): string[] {
+  return text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().match(/\p{L}+|\p{N}+/gu) ?? [];
+}
+
+/** Core's name search: every word of the query somewhere in the name, spaces ignored. */
+function nameMatcher(query: string): ((name: string) => boolean) | null {
+  const words = foldWords(query);
+  if (!words.length) return null;
+  return (name) => {
+    const compact = foldWords(name).join("");
+    return words.every((w) => compact.includes(w));
+  };
+}
+
 class MockBackend {
   sources: Source[] = [];
   groups: Group[] = [];
@@ -396,10 +411,8 @@ class MockBackend {
     if (q.sourceId) list = list.filter((c) => c.sourceId === q.sourceId);
     if (q.groupId) list = list.filter((c) => c.groupId === q.groupId);
     if (q.favoritesOnly) list = list.filter((c) => c.favorite);
-    if (q.search) {
-      const s = q.search.toLowerCase();
-      list = list.filter((c) => c.name.toLowerCase().includes(s));
-    }
+    const match = q.search ? nameMatcher(q.search) : null;
+    if (match) list = list.filter((c) => match(c.name));
     if (q.favoritesOnly && this.prefs.favoritesOrder.length) {
       const order = new Map(this.prefs.favoritesOrder.map((id, i) => [id, i]));
       list = [...list].sort((a, b) => (order.get(a.id) ?? 1e9) - (order.get(b.id) ?? 1e9) || a.number - b.number);
@@ -444,17 +457,16 @@ class MockBackend {
     let list = this.vod.filter((v) => v.kind === q.kind && !this.groupHidden(v.groupId));
     if (q.sourceId) list = list.filter((v) => v.sourceId === q.sourceId);
     if (q.groupId) list = list.filter((v) => v.groupId === q.groupId);
-    if (q.search) {
-      const s = q.search.toLowerCase();
-      list = list.filter((v) => v.name.toLowerCase().includes(s));
-    }
+    const match = q.search ? nameMatcher(q.search) : null;
+    if (match) list = list.filter((v) => match(v.name));
     return { total: list.length, items: list.slice(q.offset, q.offset + q.limit).map((v) => this.vodWithProgress(v)) };
   }
 
   search(query: string, limit: number): SearchResults {
     const s = query.trim().toLowerCase();
     const empty: SearchResults = { channels: [], liveNow: [], upcoming: [], movies: [], series: [] };
-    if (!s) return empty;
+    const match = nameMatcher(s);
+    if (!s || !match) return empty;
     const now = Date.now();
     const vis = this.visibleChannels(false);
     const liveNow: ChannelProgramme[] = [];
@@ -468,11 +480,11 @@ class MockBackend {
     }
     upcoming.sort((a, b) => a.programme.start - b.programme.start);
     return {
-      channels: vis.filter((c) => c.name.toLowerCase().includes(s)).slice(0, limit).map(strip),
+      channels: vis.filter((c) => match(c.name)).slice(0, limit).map(strip),
       liveNow: liveNow.slice(0, limit),
       upcoming: upcoming.slice(0, limit),
-      movies: this.vod.filter((v) => v.kind === "movie" && v.name.toLowerCase().includes(s)).slice(0, limit).map((v) => this.vodWithProgress(v)),
-      series: this.vod.filter((v) => v.kind === "series" && v.name.toLowerCase().includes(s)).slice(0, limit).map((v) => this.vodWithProgress(v)),
+      movies: this.vod.filter((v) => v.kind === "movie" && match(v.name)).slice(0, limit).map((v) => this.vodWithProgress(v)),
+      series: this.vod.filter((v) => v.kind === "series" && match(v.name)).slice(0, limit).map((v) => this.vodWithProgress(v)),
     };
   }
 
@@ -558,6 +570,7 @@ class MockBackend {
         limit,
         inUse: open.length,
         sessions: open.map(({ healthTimer: _h, ...info }) => info),
+        external: 0,
       });
       throw err;
     }
@@ -858,7 +871,7 @@ class MockBackend {
         return { sessionId: session.id };
       }
       case "app_info":
-        return { version: "0.2.0", dataDir: "~/.local/share/radiate" };
+        return { version: "0.2.1", dataDir: "~/.local/share/radiate" };
     }
   }
 }

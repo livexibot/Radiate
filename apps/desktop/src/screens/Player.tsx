@@ -68,7 +68,7 @@ export function Player({ route }: { route: PlayerRoute }) {
   const now = useNow(15_000);
 
   const [mpvSession, setMpvSession] = useState<string | null>(null);
-  const { state, retry, fail } = useStream(mpvSession ? null : target);
+  const { state, retry, tryAnyway, fail } = useStream(mpvSession ? null : target);
   const [fatal, setFatal] = useState<FatalInfo | null>(null);
   const [channel, setChannel] = useState<Channel | null>(null);
   const [nn, setNn] = useState<NowNext | null>(null);
@@ -516,7 +516,17 @@ export function Player({ route }: { route: PlayerRoute }) {
         }}
       />
     );
-  } else if (state.status === "limit") card = <LimitCard info={state.limit} onFreed={retryAll} />;
+  } else if (state.status === "limit")
+    card = (
+      <LimitCard
+        info={state.limit}
+        onFreed={retryAll}
+        onTryAnyway={() => {
+          setFatal(null);
+          void tryAnyway();
+        }}
+      />
+    );
   else if (state.status === "failed") card = <FailCard message={state.message} onRetry={retryAll} onAnother={alternate ? () => switchTo(alternate) : undefined} />;
   else if (fatal) card = <UnsupportedCard target={target} message={fatal.message} onMpv={setMpvSession} onBeforeOpen={() => restart(target)} />;
 

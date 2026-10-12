@@ -182,6 +182,15 @@ ingests with bounded memory (quick-xml streaming, batched inserts in one
 transaction); `channels()` and `epg_range()` answer in under 20 ms for
 typical pages. Only programmes from now - 1 day to now + 7 days are kept.
 
+Name search (`search`, and `search` in `ChannelQuery` / `VodQuery`): every
+word of the query appears somewhere in the name, ignoring case, accents,
+compatibility forms ("ᴴᴰ"), punctuation and spacing; letters and digits
+are separate words, so "sky sports" finds "SKYSPORTS" and "espn 2" finds
+"ESPN2". Each row stores a folded `search_key`. Best matches first: the
+whole name, the query as whole words, as the start of a word, anywhere;
+then favorites, shorter names and channel number (lists: channel number).
+Programme titles keep FTS5 word-prefix search.
+
 EPG matching (on every refresh, user choices first): exact tvg-id, then
 normalized name (lowercase, strip quality tags like HD/FHD/4K/UHD/SD,
 country prefixes like "UK:", "|UK|", punctuation, "+1" kept), then a
@@ -205,10 +214,13 @@ impl StreamHub {
   pub fn usage(&self) -> Vec<ConnectionUsage>;            // per source
   pub fn subscribe(&self) -> broadcast::Receiver<StreamEvent>; // health and failures
   pub fn embed_url(&self, target: &embed::EmbedTarget) -> String; // reactor page, see below
+  pub fn recent_closes(&self) -> Vec<RecentClose>;         // saved on quit
+  pub fn remember_closes(&self, closes: Vec<RecentClose>); // restored on start
 }
-pub struct OpenRequest { source_id, upstream_url, headers: Vec<(String, String)>, kind_hint: StreamKind, limit: Option<u32>, external_in_use: Option<u32>, title: String }
+pub struct OpenRequest { source_id, upstream_url, headers: Vec<(String, String)>, kind_hint: StreamKind, limit: Option<u32>, provider_in_use: Option<u32>, title: String }
+pub struct RecentClose { source_id, closed_at: i64 }
 pub struct StreamSession { id, local_url: String, kind: StreamKind }   // kind is sniffed from content-type / first bytes when the hint is Unknown
-pub enum OpenError { ConnectionLimit { source_id, limit: u32, in_use: u32, sessions: Vec<SessionInfo> } }
+pub enum OpenError { ConnectionLimit { source_id, limit: u32, in_use: u32, sessions: Vec<SessionInfo>, external: u32 } }
 pub struct SessionInfo { id, source_id, title, started_at: i64 }
 pub struct ConnectionUsage { source_id, in_use: u32, limit: Option<u32> }
 pub enum StreamEvent { Health { session_id, bitrate_kbps: u32, stalled: bool }, Failed { session_id, http_status: Option<u16>, message: String /* plain language */ }, Closed { session_id } }
@@ -219,9 +231,23 @@ Rules:
   rewritten so segment and sub-playlist fetches go through the relay under
   the same session (sequential, so still one connection's worth).
 - `open` refuses with `ConnectionLimit` when the source already has
-  `limit` sessions open (plus `external_in_use` reported by the provider
-  for other devices). No queueing, no sharing a connection between two
-  sessions, no retries that hold a second connection.
+  `limit` sessions open, plus `external`: the streams the provider reports
+  (`provider_in_use`, Xtream `active_cons`) that aren't ours. No queueing,
+  no sharing a connection between two sessions, no retries that hold a
+  second connection.
+- Providers are slow to notice a closed connection, so their count still
+  includes streams we closed a moment ago (zapping, preview to full screen,
+  an update restart). Sessions that reached the provider and closed within
+  the last 90 s are taken off its count. This only decides whether to ask
+  the provider: our own sessions never go over `limit`, and the provider
+  still refuses a stream it has no room for.
+  The shell saves them on quit (`recent-streams.json` in the data folder)
+  and restores them on start.
+- When only the provider's count is in the way, the limit card checks
+  again every 10 s for 2 minutes and offers Play anyway, which sends
+  `play_start` with `ignoreProviderCount`: the provider isn't asked for its
+  count, our own sessions still never go over `limit`, and the provider
+  decides whether to serve the stream. Multiview tiles don't offer it.
 - A session closes on `close`, or after 20 s with no reads from the player.
 - Reconnect on upstream drop: up to 3 quiet retries on the same session
   (the old connection is closed first), then `Failed`.
@@ -273,7 +299,7 @@ messages back up as `{ radiate: "yt", data }`.
 | `progress_set` | `{ itemId, positionSecs, durationSecs }` | |
 | `continue_watching` | `{ limit }` | `VodItem[]` |
 | `search_all` | `{ query, limit }` | `SearchResults` |
-| `play_start` | `{ target: PlayTarget }` | `{ sessionId, url, kind, title }` or error `{ code: "connection_limit", message, sourceId, limit, inUse, sessions: SessionInfo[] }` |
+| `play_start` | `{ target: PlayTarget, ignoreProviderCount?: boolean }` | `{ sessionId, url, kind, title }` or error `{ code: "connection_limit", message, sourceId, limit, inUse, sessions: SessionInfo[], external }` |
 | `play_stop` | `{ sessionId }` | |
 | `connections_status` | | `ConnectionUsage[]` |
 | `prefs_get` | | `Prefs` |

@@ -7,6 +7,8 @@ export interface LimitInfo {
   limit: number;
   inUse: number;
   sessions: SessionInfo[];
+  /** Streams the provider counts on other devices or apps. */
+  external: number;
 }
 
 export type StreamState =
@@ -21,6 +23,7 @@ export function useStream(target: PlayTarget | null) {
   const [state, setState] = useState<StreamState>({ status: target ? "starting" : "idle" });
   const [attempt, setAttempt] = useState(0);
   const sessionRef = useRef<string | null>(null);
+  const anywayRef = useRef(false);
   const key = target ? `${target.type}:${target.id}` : "";
 
   useEffect(() => {
@@ -30,7 +33,8 @@ export function useStream(target: PlayTarget | null) {
     }
     let alive = true;
     setState({ status: "starting" });
-    const lease = acquire(target);
+    const lease = acquire(target, { ignoreProviderCount: anywayRef.current });
+    anywayRef.current = false;
     lease.promise.then(
       (stream) => {
         if (!alive) return;
@@ -72,7 +76,13 @@ export function useStream(target: PlayTarget | null) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
+  /** Start once more without the provider's own count, after the user said nothing else is playing. */
+  const tryAnyway = useCallback(async () => {
+    anywayRef.current = true;
+    await retry();
+  }, [retry]);
+
   const fail = useCallback((message: string) => setState({ status: "failed", message }), []);
 
-  return { state, retry, fail };
+  return { state, retry, tryAnyway, fail };
 }

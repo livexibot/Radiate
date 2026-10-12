@@ -6,7 +6,8 @@ use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 
 use super::sources::{insert_episodes, EpisodeRow};
-use super::{fts_query, load_source, now_ms, Core};
+use super::{load_source, now_ms, Core};
+use crate::text::TextQuery;
 use crate::types::{
     Channel, ChannelQuery, ContentKind, Episode, Group, Page, Season, SeriesInfo, SourceKind,
     VodItem, VodQuery,
@@ -167,12 +168,9 @@ impl Core {
         if let Some(g) = q.group_id.as_deref() {
             arg(&mut filters, "c.group_id = ?", g.to_string().into());
         }
-        if let Some(fts) = q.search.as_deref().and_then(fts_query) {
-            arg(
-                &mut filters,
-                "c.pk IN (SELECT rowid FROM channels_fts WHERE channels_fts MATCH ?)",
-                fts.into(),
-            );
+        let text = q.search.as_deref().and_then(TextQuery::parse);
+        if let Some(text) = &text {
+            filters.push(text.filter("c.search_key", &mut args));
         }
         if q.favorites_only {
             filters.push("c.favorite = 1".into());
@@ -218,12 +216,18 @@ impl Core {
             |r| r.get(0),
         )?;
         let limit = if q.limit == 0 { -1 } else { i64::from(q.limit) };
+        // A search lists the best matches first.
+        let mut select_args = args.clone();
+        let rank = match &text {
+            Some(text) => format!("{}, ", text.rank("c.search_key", &mut select_args)),
+            None => String::new(),
+        };
         let mut stmt = conn.prepare(&format!(
-            "SELECT {CHANNEL_COLS} {from} {where_sql} ORDER BY c.number, c.name, c.pk LIMIT {limit} OFFSET {}",
+            "SELECT {CHANNEL_COLS} {from} {where_sql} ORDER BY {rank}c.number, c.name, c.pk LIMIT {limit} OFFSET {}",
             q.offset
         ))?;
         let items = stmt
-            .query_map(params_from_iter(&args), channel_row)?
+            .query_map(params_from_iter(&select_args), channel_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(Page { total, items })
     }
@@ -324,12 +328,9 @@ impl Core {
             args.push(g.to_string().into());
             filters.push(format!("v.group_id = ?{}", args.len()));
         }
-        if let Some(fts) = q.search.as_deref().and_then(fts_query) {
-            args.push(fts.into());
-            filters.push(format!(
-                "v.pk IN (SELECT rowid FROM vod_fts WHERE vod_fts MATCH ?{})",
-                args.len()
-            ));
+        let text = q.search.as_deref().and_then(TextQuery::parse);
+        if let Some(text) = &text {
+            filters.push(text.filter("v.search_key", &mut args));
         }
         let from = "FROM vod v JOIN groups g ON g.id = v.group_id LEFT JOIN progress p ON p.item_id = v.id";
         let where_sql = filters.join(" AND ");
@@ -340,12 +341,17 @@ impl Core {
             |r| r.get(0),
         )?;
         let limit = if q.limit == 0 { -1 } else { i64::from(q.limit) };
+        let mut select_args = args.clone();
+        let rank = match &text {
+            Some(text) => format!("{}, ", text.rank("v.search_key", &mut select_args)),
+            None => String::new(),
+        };
         let mut stmt = conn.prepare(&format!(
-            "SELECT {VOD_COLS} {from} WHERE {where_sql} ORDER BY v.pk LIMIT {limit} OFFSET {}",
+            "SELECT {VOD_COLS} {from} WHERE {where_sql} ORDER BY {rank}v.pk LIMIT {limit} OFFSET {}",
             q.offset
         ))?;
         let items = stmt
-            .query_map(params_from_iter(&args), vod_row)?
+            .query_map(params_from_iter(&select_args), vod_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(Page { total, items })
     }
