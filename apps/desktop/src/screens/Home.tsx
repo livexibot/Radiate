@@ -1,18 +1,20 @@
 import { useMemo, useState } from "react";
-import { api, type Channel, type Group, type Programme } from "../api";
-import { ChannelCard, EventCard } from "../components/Cards";
+import { api, type Channel, type Group, type Programme, type VodItem } from "../api";
+import { ChannelCard, EventCard, VodCard } from "../components/Cards";
 import { ContextMenu, type MenuState } from "../components/ContextMenu";
 import { Empty } from "../components/Empty";
-import { Icon } from "../components/Icon";
+import { Icon, type IconName } from "../components/Icon";
+import { Logo } from "../components/Logo";
 import { Progress } from "../components/Progress";
-import { CardRowSkeleton, Skeleton } from "../components/Skeleton";
+import { CardSkeletons, Skeleton } from "../components/Skeleton";
 import { liveSports, onNow, pickHero, startingSoon, type LiveItem } from "../lib/home";
 import { monogram, tone } from "../lib/monogram";
 import { isSportsGroup } from "../lib/sports";
-import { clock, greeting, HOUR, progressOf, timeRange } from "../lib/time";
-import { useApp } from "../state/app";
+import { clock, HOUR, progressOf, timeRange } from "../lib/time";
+import { useApp, type Route } from "../state/app";
 import { useChannelActions } from "../state/channelActions";
 import { useLoad, useNow, useNowNext, useSportsOverrides } from "../state/hooks";
+import { continueSub } from "./Library";
 
 // Bounded so Home stays quick with very large playlists.
 const FAVORITES = 40;
@@ -20,6 +22,7 @@ const SPORTS_GROUPS = 12;
 const PER_SPORTS_GROUP = 24;
 const SPORTS_CHANNELS = 160;
 const OTHERS = 60;
+const CONTINUE = 12;
 const SOON = 6 * HOUR;
 
 interface HomeData {
@@ -28,10 +31,11 @@ interface HomeData {
   others: Channel[];
   last: Channel | null;
   epg: Record<string, Programme[]>;
+  cont: VodItem[];
 }
 
 export function Home() {
-  const { navigate, prefs, version } = useApp();
+  const { navigate, prefs, version, sources } = useApp();
   const now = useNow(30_000);
   const overrides = useSportsOverrides();
   const { menuFor } = useChannelActions();
@@ -41,17 +45,18 @@ export function Home() {
     const groups = await api.groupsList("live", false).catch(() => [] as Group[]);
     const sportsGroups = groups.filter((g) => isSportsGroup(g, overrides)).slice(0, SPORTS_GROUPS);
     const page = (groupId: string, limit: number) => api.channelsList({ groupId, favoritesOnly: false, includeHidden: false, offset: 0, limit }).then((p) => p.items, () => [] as Channel[]);
-    const [fav, sportsLists, others, last] = await Promise.all([
+    const [fav, sportsLists, others, last, cont] = await Promise.all([
       api.channelsList({ favoritesOnly: true, includeHidden: false, offset: 0, limit: FAVORITES }).then((p) => p.items, () => [] as Channel[]),
       Promise.all(sportsGroups.map((g) => page(g.id, PER_SPORTS_GROUP))),
       api.channelsList({ favoritesOnly: false, includeHidden: false, offset: 0, limit: OTHERS }).then((p) => p.items, () => [] as Channel[]),
       prefs?.lastChannelId ? api.channelGet(prefs.lastChannelId).catch(() => null) : Promise.resolve(null),
+      api.continueWatching(CONTINUE).catch(() => [] as VodItem[]),
     ]);
     const sports = sportsLists.flat().slice(0, SPORTS_CHANNELS);
     const at = Date.now();
     const epgIds = [...new Set([...fav, ...sports].map((c) => c.id))];
     const epg = epgIds.length ? await api.epgRange(epgIds, at, at + SOON).catch(() => ({})) : {};
-    return { favorites: fav, sports, others, last, epg };
+    return { favorites: fav, sports, others, last, epg, cont };
   }, [version, overrides, prefs?.lastChannelId]);
 
   const ids = useMemo(() => (data ? [...data.favorites, ...data.sports, ...data.others, ...(data.last ? [data.last] : [])].map((c) => c.id) : []), [data]);
@@ -70,20 +75,18 @@ export function Home() {
 
   const play = (c: Channel, favoritesOnly = false) =>
     navigate({ name: "player", target: { type: "channel", id: c.id }, ctx: { groupId: favoritesOnly ? null : c.groupId, favoritesOnly } });
+  const openVod = (v: VodItem) => navigate(v.kind === "series" ? { name: "seriesDetail", id: v.seriesId ?? v.id } : { name: "movie", id: v.id });
   const openMenu = (c: Channel) => (e: React.MouseEvent) => setMenu({ x: e.clientX, y: e.clientY, items: menuFor(c) });
   const empty = data && !data.favorites.length && !data.sports.length && !data.others.length;
+  const hasMovies = !!sources?.some((s) => s.movieCount > 0);
+  const hasSeries = !!sources?.some((s) => s.seriesCount > 0);
 
   return (
     <div className="screen home">
-      <header className="topbar">
-        <h1>{greeting(now)}</h1>
-        <div className="meta">
-          <span className="pill num">{clock(now)}</span>
-        </div>
-      </header>
+      <h1 className="sr-only">Home</h1>
 
       {!view ? (
-        <Skeleton className="hero" r={18} />
+        <Skeleton className="hero" r={24} />
       ) : view.hero ? (
         <Hero item={view.hero} at={now} onPlay={() => play(view.hero!.channel, view.hero!.channel.favorite)} onMulti={() => navigate({ name: "multiview", channelId: view.hero!.channel.id })} />
       ) : empty ? (
@@ -95,14 +98,14 @@ export function Home() {
       ) : null}
 
       {!view || view.sports.length > 0 ? (
-        <Row title="Live sports" onMore={() => navigate({ name: "guide", chip: "sports" })}>
-          {!view ? <CardRowSkeleton /> : view.sports.map((it) => <ChannelCard key={it.channel.id} channel={it.channel} now={it.now} at={now} onOpen={() => play(it.channel)} onMenu={openMenu(it.channel)} live />)}
+        <Row title="Live sports" size="lg" more={{ label: "Guide", onClick: () => navigate({ name: "guide", chip: "sports" }) }}>
+          {!view ? <CardSkeletons /> : view.sports.map((it) => <ChannelCard key={it.channel.id} channel={it.channel} now={it.now} at={now} onOpen={() => play(it.channel)} onMenu={openMenu(it.channel)} live />)}
         </Row>
       ) : null}
 
       {!data || data.favorites.length > 0 ? (
-        <Row title="Favorites">
-          {!data ? <CardRowSkeleton /> : data.favorites.map((c) => <ChannelCard key={c.id} channel={c} now={nn[c.id]?.now} at={now} onOpen={() => play(c, true)} onMenu={openMenu(c)} />)}
+        <Row title="Favorites" more={{ label: "All", onClick: () => navigate({ name: "favorites" }) }}>
+          {!data ? <CardSkeletons /> : data.favorites.map((c) => <ChannelCard key={c.id} channel={c} now={nn[c.id]?.now} at={now} onOpen={() => play(c, true)} onMenu={openMenu(c)} />)}
         </Row>
       ) : null}
 
@@ -115,8 +118,18 @@ export function Home() {
       ) : null}
 
       {!view || view.rest.length > 0 ? (
-        <Row title="On now">
-          {!view ? <CardRowSkeleton /> : view.rest.map((it) => <ChannelCard key={it.channel.id} channel={it.channel} now={it.now} at={now} onOpen={() => play(it.channel)} onMenu={openMenu(it.channel)} />)}
+        <Row title="On now" more={{ label: "Live TV", onClick: () => navigate({ name: "live" }) }}>
+          {!view ? <CardSkeletons /> : view.rest.map((it) => <ChannelCard key={it.channel.id} channel={it.channel} now={it.now} at={now} onOpen={() => play(it.channel)} onMenu={openMenu(it.channel)} />)}
+        </Row>
+      ) : null}
+
+      {data && (hasMovies || hasSeries || data.cont.length > 0) ? (
+        <Row title="Movies & series">
+          {hasMovies ? <Shortcut icon="film" label="Movies" route={{ name: "library", tab: "movie" }} /> : null}
+          {hasSeries ? <Shortcut icon="series" label="Series" route={{ name: "library", tab: "series" }} /> : null}
+          {data.cont.map((v) => (
+            <VodCard key={v.id} item={v} onOpen={() => openVod(v)} sub={continueSub(v)} />
+          ))}
         </Row>
       ) : null}
       {menu ? <ContextMenu menu={menu} onClose={() => setMenu(null)} /> : null}
@@ -124,19 +137,32 @@ export function Home() {
   );
 }
 
-function Row({ title, children, onMore }: { title: string; children: React.ReactNode; onMore?: () => void }) {
+function Row({ title, children, more, size }: { title: string; children: React.ReactNode; more?: { label: string; onClick: () => void }; size?: "lg" }) {
   return (
     <section className="row">
       <div className="row-head">
         <h2 className="row-title">{title}</h2>
-        {onMore ? (
-          <button type="button" className="btn small ghost" onClick={onMore}>
-            Guide <Icon name="right" />
+        {more ? (
+          <button type="button" className="row-more" onClick={more.onClick}>
+            {more.label}
+            <Icon name="right" />
           </button>
         ) : null}
       </div>
-      <div className="cards">{children}</div>
+      <div className={size ? `cards ${size}` : "cards"}>{children}</div>
     </section>
+  );
+}
+
+function Shortcut({ icon, label, route }: { icon: IconName; label: string; route: Route }) {
+  const { navigate } = useApp();
+  return (
+    <button type="button" className="card shortcut" onClick={() => navigate(route)}>
+      <span className="shortcut-ico">
+        <Icon name={icon} />
+      </span>
+      <b>{label}</b>
+    </button>
   );
 }
 
@@ -148,19 +174,34 @@ function Hero({ item, at, onPlay, onMulti }: { item: LiveItem; at: number; onPla
     <section className={`hero ${tone(channel.name)}`} aria-label={channel.name}>
       <span className="hero-mark" aria-hidden="true">{monogram(channel.name)}</span>
       <div className="hero-body">
-        {live ? <span className="live-tag">Live · {mins}′</span> : null}
+        <div className="hero-kicker">
+          {live ? (
+            <span className="live-pill">
+              Live <span className="num">{mins}′</span>
+            </span>
+          ) : null}
+          {channel.logo ? <Logo name={channel.name} src={channel.logo} className="hero-logo" /> : null}
+          <span className="hero-channel">
+            <span className="num">{channel.number}</span> {channel.name}
+          </span>
+        </div>
         <h2>{now?.title ?? channel.name}</h2>
-        <p>
-          {channel.number} · {channel.name}
-          {now ? ` · ${timeRange(now.start, now.stop)}` : ""}
-          {next ? ` · Next ${clock(next.start)} ${next.title}` : ""}
-        </p>
-        {now ? <Progress value={progressOf(now.start, now.stop, at)} className="hero-bar" /> : null}
+        {now ? (
+          <div className="hero-time">
+            <span className="num">{timeRange(now.start, now.stop)}</span>
+            <Progress value={progressOf(now.start, now.stop, at)} className="hero-bar" />
+          </div>
+        ) : null}
+        {next ? (
+          <p className="hero-next">
+            <b>Next</b> <span className="num">{clock(next.start)}</span> {next.title}
+          </p>
+        ) : null}
         <div className="btns">
-          <button type="button" className="btn pri" onClick={onPlay}>
+          <button type="button" className="btn pri lg" onClick={onPlay}>
             <Icon name="play" /> Watch
           </button>
-          <button type="button" className="btn" onClick={onMulti}>
+          <button type="button" className="btn lg" onClick={onMulti}>
             <Icon name="grid" /> Multiview
           </button>
         </div>

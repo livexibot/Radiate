@@ -1,6 +1,6 @@
-.next-ep { position: absolute; right: 3rem; bottom: 11rem; z-index: 4; display: grid; gap: 0.7rem; min-width: 17rem; max-width: 24rem; padding: 1.1rem 1.25rem; border-radius: var(--r-xl); background: rgba(21, 28, 46, 0.94); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45); }
-.next-ep .next-ep-kicker { font-size: 0.78rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mute); }
-.next-ep b { font-size: 1.05rem; line-height: 1.3; }
-.next-ep .next-ep-btns { display: flex; gap: 0.5rem; }
-.next-ep .next-ep-count { position: relative; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.18); overflow: hidden; }
-.next-ep .next-ep-count i { position: absolute; inset: 0 auto 0 0; background: var(--acc); transition: width 1s linear; }
+.next-ep { position: absolute; right: var(--gutter); bottom: 11rem; z-index: 4; display: grid; gap: var(--sp-3); min-width: 17rem; max-width: 24rem; padding: var(--sp-5); border-radius: var(--r-xl); background: var(--c-glass); box-shadow: var(--e-3), inset 0 0 0 1px var(--c-line); backdrop-filter: blur(12px); }
+.next-ep .next-ep-kicker { font-size: var(--fs-2xs); font-weight: var(--fw-black); letter-spacing: var(--ls-caps); text-transform: uppercase; color: var(--c-text-3); }
+.next-ep b { font-size: var(--fs-md); line-height: 1.3; }
+.next-ep .next-ep-btns { display: flex; gap: var(--sp-2); }
+.next-ep .next-ep-count { position: relative; height: 3px; border-radius: var(--r-pill); background: rgba(255, 255, 255, 0.18); overflow: hidden; }
+.next-ep .next-ep-count i { position: absolute; inset: 0 auto 0 0; background: var(--c-accent); transition: width 1s linear; }

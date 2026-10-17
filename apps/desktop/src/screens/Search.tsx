@@ -98,90 +98,88 @@ export function Search({ initial }: { initial?: string }) {
 
   return (
     <div className="screen search">
-      <header className="topbar">
-        <h1>Search</h1>
-      </header>
-      <label className="search-big">
-        <Icon name="search" />
-        <input ref={inputRef} className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Channels, shows, movies, series" aria-label="Search" spellCheck={false} />
-        {q ? (
-          <button type="button" className="icon-btn" aria-label="Clear" onClick={() => { setQ(""); inputRef.current?.focus(); }}>
-            <Icon name="close" />
-          </button>
+      <h1 className="sr-only">Search</h1>
+      <div className={q.trim() ? "search-col" : "search-col idle"}>
+        <label className="search-big">
+          <Icon name="search" />
+          <input ref={inputRef} className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Channels, shows, movies, series" aria-label="Search" spellCheck={false} />
+          {q ? (
+            <button type="button" className="icon-btn" aria-label="Clear" onClick={() => { setQ(""); inputRef.current?.focus(); }}>
+              <Icon name="close" />
+            </button>
+          ) : null}
+        </label>
+        {res ? (
+          <div className="search-chips">
+            <Chips items={chips} value={filter} onChange={(f) => setFilter(f as Filter)} label="Result types" />
+          </div>
         ) : null}
-      </label>
-      {res ? (
-        <div className="search-chips">
-          <Chips items={chips} value={filter} onChange={(f) => setFilter(f as Filter)} label="Result types" />
-        </div>
-      ) : null}
 
-      {!query ? (
-        <Empty icon="search" title="Search everything" />
-      ) : loading && !res ? (
-        <div className="results">
-          {Array.from({ length: 6 }, (_, i) => (
-            <Skeleton key={i} h="3.6rem" r={12} />
-          ))}
-        </div>
-      ) : nothing ? (
-        <Empty icon="search" title={`Nothing matches "${query}"`} />
-      ) : res && chosen ? (
-        <div className="results">
-          {show("live") && res.liveNow.length > 0 ? (
-            <Section title="On now" more={chosen.live.more}>
-              {chosen.live.rows.map(({ channel, programme }) => (
-                <button type="button" className="res" key={`${channel.id}${programme.start}`} onClick={() => playChannel(channel)}>
-                  <Logo name={channel.name} src={channel.logo} />
-                  <span className="res-main">
-                    <b className="ellipsis"><Mark text={programme.title} q={query} /></b>
-                    <span className="ellipsis">{channel.name} · {timeRange(programme.start, programme.stop)}</span>
-                    <Progress value={progressOf(programme.start, programme.stop, now)} className="res-bar" />
-                  </span>
-                  <span className="live-tag">Live</span>
-                </button>
-              ))}
-            </Section>
-          ) : null}
-          {show("channels") && res.channels.length > 0 ? (
-            <Section title="Channels" more={chosen.channels.more}>
-              {chosen.channels.rows.map((c) => (
-                <button type="button" className="res" key={c.id} onClick={() => playChannel(c)}>
-                  <Logo name={c.name} src={c.logo} />
-                  <span className="res-main">
-                    <b className="ellipsis"><Mark text={c.name} q={query} /></b>
-                    <span className="ellipsis num">{c.number} · {c.groupName}</span>
-                  </span>
-                  {c.favorite ? <span className="star-inline">★</span> : null}
-                </button>
-              ))}
-            </Section>
-          ) : null}
-          {show("upcoming") && res.upcoming.length > 0 ? (
-            <Section title="Upcoming" more={chosen.upcoming.more}>
-              {chosen.upcoming.rows.map(({ channel, programme }) => (
-                <button type="button" className="res" key={`${channel.id}${programme.start}`} onClick={() => playChannel(channel)}>
-                  <Logo name={channel.name} src={channel.logo} />
-                  <span className="res-main">
-                    <b className="ellipsis"><Mark text={programme.title} q={query} /></b>
-                    <span className="ellipsis">{channel.name} · {dayLabel(programme.start, now)} {clock(programme.start)}</span>
-                  </span>
-                </button>
-              ))}
-            </Section>
-          ) : null}
-          {show("movies") && res.movies.length > 0 ? (
-            <Section title="Movies" more={chosen.movies.more}>
-              {chosen.movies.rows.map((v) => <VodRow key={v.id} v={v} q={query} onOpen={() => openVod(v)} />)}
-            </Section>
-          ) : null}
-          {show("series") && res.series.length > 0 ? (
-            <Section title="Series" more={chosen.series.more}>
-              {chosen.series.rows.map((v) => <VodRow key={v.id} v={v} q={query} onOpen={() => openVod(v)} />)}
-            </Section>
-          ) : null}
-        </div>
-      ) : null}
+        {!query ? null : loading && !res ? (
+          <div className="results">
+            {Array.from({ length: 6 }, (_, i) => (
+              <Skeleton key={i} h="3.6rem" r={12} />
+            ))}
+          </div>
+        ) : nothing ? (
+          <Empty icon="search" title={`Nothing matches "${query}"`} />
+        ) : res && chosen ? (
+          <div className="results">
+            {show("live") && res.liveNow.length > 0 ? (
+              <Section title="On now" more={chosen.live.more}>
+                {chosen.live.rows.map(({ channel, programme }) => (
+                  <button type="button" className="res" key={`${channel.id}${programme.start}`} onClick={() => playChannel(channel)}>
+                    <Logo name={channel.name} src={channel.logo} />
+                    <span className="res-main">
+                      <b className="ellipsis"><Mark text={programme.title} q={query} /></b>
+                      <span className="ellipsis">{channel.name} · {timeRange(programme.start, programme.stop)}</span>
+                      <Progress value={progressOf(programme.start, programme.stop, now)} className="res-bar" />
+                    </span>
+                    <span className="live-tag">Live</span>
+                  </button>
+                ))}
+              </Section>
+            ) : null}
+            {show("channels") && res.channels.length > 0 ? (
+              <Section title="Channels" more={chosen.channels.more}>
+                {chosen.channels.rows.map((c) => (
+                  <button type="button" className="res" key={c.id} onClick={() => playChannel(c)}>
+                    <Logo name={c.name} src={c.logo} />
+                    <span className="res-main">
+                      <b className="ellipsis"><Mark text={c.name} q={query} /></b>
+                      <span className="ellipsis num">{c.number} · {c.groupName}</span>
+                    </span>
+                    {c.favorite ? <span className="star-inline">★</span> : null}
+                  </button>
+                ))}
+              </Section>
+            ) : null}
+            {show("upcoming") && res.upcoming.length > 0 ? (
+              <Section title="Upcoming" more={chosen.upcoming.more}>
+                {chosen.upcoming.rows.map(({ channel, programme }) => (
+                  <button type="button" className="res" key={`${channel.id}${programme.start}`} onClick={() => playChannel(channel)}>
+                    <Logo name={channel.name} src={channel.logo} />
+                    <span className="res-main">
+                      <b className="ellipsis"><Mark text={programme.title} q={query} /></b>
+                      <span className="ellipsis">{channel.name} · {dayLabel(programme.start, now)} {clock(programme.start)}</span>
+                    </span>
+                  </button>
+                ))}
+              </Section>
+            ) : null}
+            {show("movies") && res.movies.length > 0 ? (
+              <Section title="Movies" more={chosen.movies.more}>
+                {chosen.movies.rows.map((v) => <VodRow key={v.id} v={v} q={query} onOpen={() => openVod(v)} />)}
+              </Section>
+            ) : null}
+            {show("series") && res.series.length > 0 ? (
+              <Section title="Series" more={chosen.series.more}>
+                {chosen.series.rows.map((v) => <VodRow key={v.id} v={v} q={query} onOpen={() => openVod(v)} />)}
+              </Section>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

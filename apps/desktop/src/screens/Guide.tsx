@@ -380,6 +380,7 @@ export function Guide({ initialChip }: { initialChip?: string }) {
   const info = selProg;
   return (
     <div className="screen fill guide">
+      <h1 className="sr-only">Guide</h1>
       <div className="guide-head">
         <StreamView target={previewChannelId ? { type: "channel", id: previewChannelId } : null} backdrop={selChannel?.name} className="guide-preview" compact>
           {selChannel ? <span className="preview-tag">{selChannel.number} · {selChannel.name}</span> : null}

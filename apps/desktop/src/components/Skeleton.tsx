@@ -5,11 +5,12 @@ export function Skeleton({ w, h, r, className = "" }: { w?: number | string; h?:
   return <span className={`skel ${className}`} style={style} aria-hidden="true" />;
 }
 
-export function CardRowSkeleton({ count = 5 }: { count?: number }) {
+/** Placeholder cards, to sit inside a `.cards` row or a `.card-grid`. */
+export function CardSkeletons({ count = 5 }: { count?: number }) {
   return (
-    <div className="cards" aria-busy="true">
+    <>
       {Array.from({ length: count }, (_, i) => (
-        <div className="card card-skel" key={i}>
+        <div className="card card-skel" key={i} aria-hidden="true">
           <Skeleton className="card-thumb" />
           <div className="card-text">
             <Skeleton w="70%" h="0.9rem" />
@@ -17,6 +18,6 @@ export function CardRowSkeleton({ count = 5 }: { count?: number }) {
           </div>
         </div>
       ))}
-    </div>
+    </>
   );
 }

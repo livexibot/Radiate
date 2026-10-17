@@ -22,49 +22,60 @@ export function MovieDetail({ id }: { id: string }) {
         <Icon name="back" />
       </button>
       <div className="detail-body">
-        {error ? (
-          <p className="error-line">{error}</p>
-        ) : !m ? (
-          <div className="detail-info">
-            <Skeleton w="12rem" h="1.6rem" />
-            <Skeleton w="28rem" h="3rem" />
-            <Skeleton w="22rem" h="1rem" />
-          </div>
-        ) : (
-          <div className="detail-info">
-            <span className="pill ghost">Movie · {sourceName(m.sourceId)}</span>
-            <h1>{m.name}</h1>
-            <div className="facts">
-              {m.rating ? <span className="rt">★ {m.rating.toFixed(1)}</span> : null}
-              {m.year ? <span>{m.year}</span> : null}
-              <span>{m.groupName}</span>
+        <div className="detail-top">
+          {error ? (
+            <p className="error-line">{error}</p>
+          ) : !m ? (
+            <div className="detail-info">
+              <Skeleton w="12rem" h="1.6rem" />
+              <Skeleton w="28rem" h="3rem" />
+              <Skeleton w="22rem" h="1rem" />
             </div>
-            {m.plot ? <p>{m.plot}</p> : null}
-            {inProgress ? (
-              <div className="detail-progress">
-                <Progress value={m.progress} />
-                <span className="mute num">{Math.round((m.progress ?? 0) * 100)}%</span>
+          ) : (
+            <div className="detail-info">
+              <span className="detail-kind">Movie · {sourceName(m.sourceId)}</span>
+              <h1>{m.name}</h1>
+              <div className="facts">
+                {m.rating ? <span className="rt">★ {m.rating.toFixed(1)}</span> : null}
+                {m.year ? <span>{m.year}</span> : null}
+                <span>{m.groupName}</span>
               </div>
-            ) : null}
-            <div className="btns">
+              {m.plot ? <p>{m.plot}</p> : null}
               {inProgress ? (
-                <>
-                  <button type="button" className="btn pri" onClick={() => play(m.progress ?? undefined)}>
-                    <Icon name="play" /> Resume
+                <div className="detail-progress">
+                  <Progress value={m.progress} />
+                  <span className="mute num">{Math.round((m.progress ?? 0) * 100)}%</span>
+                </div>
+              ) : null}
+              <div className="btns">
+                {inProgress ? (
+                  <>
+                    <button type="button" className="btn pri" onClick={() => play(m.progress ?? undefined)}>
+                      <Icon name="play" /> Resume
+                    </button>
+                    <button type="button" className="btn" onClick={() => play(0)}>
+                      From the start
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" className="btn pri" onClick={() => play()}>
+                    <Icon name="play" /> Play
                   </button>
-                  <button type="button" className="btn" onClick={() => play(0)}>
-                    From the start
-                  </button>
-                </>
-              ) : (
-                <button type="button" className="btn pri" onClick={() => play()}>
-                  <Icon name="play" /> Play
-                </button>
-              )}
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+          {m ? <DetailPoster name={m.name} src={m.poster} /> : null}
+        </div>
       </div>
     </div>
+  );
+}
+
+export function DetailPoster({ name, src }: { name: string; src: string | null }) {
+  return (
+    <span className={`detail-poster ${tone(name)}`} aria-hidden="true">
+      {src ? <img src={src} alt="" /> : <span>{name}</span>}
+    </span>
   );
 }
