@@ -5,7 +5,6 @@ import { startsIn } from "../lib/home";
 import { clock, dayLabel, progressOf, timeRange } from "../lib/time";
 import { Logo } from "./Logo";
 import { Progress } from "./Progress";
-import { monogram } from "../lib/monogram";
 
 interface ChannelCardProps {
   channel: Channel;
@@ -22,7 +21,7 @@ export function ChannelCard({ channel, now, at, onOpen, onMenu, sub, live }: Cha
   return (
     <button
       type="button"
-      className="card"
+      className={live && now ? "card live" : "card"}
       onClick={onOpen}
       onContextMenu={(e) => {
         if (!onMenu) return;
@@ -32,7 +31,7 @@ export function ChannelCard({ channel, now, at, onOpen, onMenu, sub, live }: Cha
       aria-label={`${channel.name}${now ? `, ${now.title}` : ""}`}
     >
       <span className={`card-thumb ${tone(channel.name)}`}>
-        <span className="card-badge">{monogram(channel.name)}</span>
+        <Logo name={channel.name} src={channel.logo} className="card-mark" />
         {live && now ? <span className="card-live">Live</span> : null}
         {channel.favorite ? <span className="card-star" aria-hidden="true">★</span> : null}
         <span className="card-num num">{channel.number}</span>
@@ -60,7 +59,7 @@ export function EventCard({ channel, programme, at, onOpen, onMenu }: { channel:
       aria-label={`${programme.title}, ${channel.name}, ${clock(programme.start)}`}
     >
       <span className={`card-thumb ${tone(channel.name)}`}>
-        <span className="card-badge">{monogram(channel.name)}</span>
+        <Logo name={channel.name} src={channel.logo} className="card-chip" />
         {channel.favorite ? <span className="card-star" aria-hidden="true">★</span> : null}
         <span className="card-kick">
           <b className="num">{clock(programme.start)}</b>

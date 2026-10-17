@@ -106,6 +106,24 @@ export function onNow(channels: Channel[], nn: Record<string, NowNext>, at: numb
     .slice(0, limit);
 }
 
+export interface FavoritesView {
+  /** favorites showing live sport now, best events first */
+  sports: LiveItem[];
+  /** other favorites with something on air, in the user's order */
+  onNow: LiveItem[];
+  /** favorites with nothing on air (between programmes, or no guide) */
+  other: LiveItem[];
+}
+
+/** The Favorites screen: every favorite channel exactly once, live sport first. */
+export function favoritesView(favorites: Channel[], nn: Record<string, NowNext>, at: number, overrides: SportsOverrides = NO_OVERRIDES): FavoritesView {
+  const unique = uniqueChannels(favorites);
+  const sports = liveSports(unique, nn, at, overrides);
+  const shown = new Set(sports.map((s) => s.channel.id));
+  const rest = unique.filter((c) => !shown.has(c.id)).map((c) => item(c, nn));
+  return { sports, onNow: rest.filter((it) => onAir(it.now, at)), other: rest.filter((it) => !onAir(it.now, at)) };
+}
+
 /** "in 25 min", "in 2 h 10 min" */
 export function startsIn(start: number, at: number): string {
   const m = Math.max(0, Math.round((start - at) / 60_000));

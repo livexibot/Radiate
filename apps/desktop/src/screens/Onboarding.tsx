@@ -17,10 +17,10 @@ const PHASES: { id: string; label: string }[] = [
   { id: "matching", label: "Matching guide to channels" },
 ];
 
-const OPTIONS: { kind: Kind; ico: string; title: string; sub: string }[] = [
-  { kind: "m3u", ico: "M3U", title: "Playlist link", sub: "M3U or M3U8 address, or a file" },
-  { kind: "xtream", ico: "XC", title: "Xtream Codes login", sub: "Server, username and password" },
-  { kind: "free", ico: "FREE", title: "Free public channels", sub: "Free-to-air streams by country" },
+const OPTIONS: { kind: Kind; ico: string; title: string }[] = [
+  { kind: "m3u", ico: "M3U", title: "Playlist link" },
+  { kind: "xtream", ico: "XC", title: "Xtream Codes login" },
+  { kind: "free", ico: "FREE", title: "Free public channels" },
 ];
 
 export function Onboarding({ firstRun }: { firstRun: boolean }) {
@@ -72,7 +72,7 @@ export function Onboarding({ firstRun }: { firstRun: boolean }) {
   return (
     <div className="ob">
       <div className="ob-l">
-        <div className="rail-logo">R</div>
+        <div className="brand-mark lg">R</div>
         <h1>{step === "groups" ? "Pick your groups" : step === "progress" ? "Loading your source" : "Add a source"}</h1>
         <ol className="ob-steps">
           {["Source", "Loading", "Groups"].map((label, i) => {
@@ -106,10 +106,7 @@ export function Onboarding({ firstRun }: { firstRun: boolean }) {
                 onFocus={() => setKind(o.kind)}
               >
                 <span className="src-ico">{o.ico}</span>
-                <span>
-                  <b>{o.title}</b>
-                  <span>{o.sub}</span>
-                </span>
+                <b className="src-name">{o.title}</b>
                 <Icon name="right" />
               </button>
             ))}

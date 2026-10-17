@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
 import { api } from "./api";
-import { Rail } from "./components/Rail";
 import { Toasts } from "./components/Toasts";
+import { TopBar } from "./components/TopBar";
 import { Guide } from "./screens/Guide";
+import { Favorites } from "./screens/Favorites";
 import { Home } from "./screens/Home";
 import { Library } from "./screens/Library";
 import { Live } from "./screens/Live";
@@ -43,6 +44,7 @@ export function App() {
         g: { name: "guide" },
         l: { name: "live" },
         h: { name: "home" },
+        f: { name: "favorites" },
         b: { name: "library" },
         m: { name: "library", tab: "movie" },
         s: { name: "library", tab: "series" },
@@ -79,6 +81,9 @@ export function App() {
   switch (route.name) {
     case "home":
       screen = <Home />;
+      break;
+    case "favorites":
+      screen = <Favorites />;
       break;
     case "live":
       screen = <Live route={route} />;
@@ -120,7 +125,7 @@ export function App() {
 
   return (
     <div className={fullscreen ? "app bare" : "app"}>
-      {fullscreen ? null : <Rail />}
+      {fullscreen ? null : <TopBar />}
       <main className="main-area">{screen}</main>
       <Toasts />
     </div>

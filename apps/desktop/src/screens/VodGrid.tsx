@@ -60,16 +60,13 @@ export function VodGrid({ kind }: { kind: Extract<ContentKind, "movie" | "series
   const title = kind === "movie" ? "Movies" : "Series";
 
   return (
-    <div className="screen vod-grid">
-      <header className="topbar">
-        <h1>{title}</h1>
+    <section className="vod" aria-label={title}>
+      <div className="vod-bar">
+        <Chips items={chips} value={group} onChange={setGroup} label="Groups" />
         <label className="search-mini">
           <Icon name="search" />
           <input className="input" placeholder={`Search ${title.toLowerCase()}`} value={q} onChange={(e) => setQ(e.target.value)} aria-label={`Search ${title.toLowerCase()}`} />
         </label>
-      </header>
-      <div className="vod-chips">
-        <Chips items={chips} value={group} onChange={setGroup} label="Groups" />
       </div>
       {total === null ? (
         <div className="posters">
@@ -90,6 +87,6 @@ export function VodGrid({ kind }: { kind: Extract<ContentKind, "movie" | "series
         </div>
       )}
       <div ref={sentinel} className="sentinel" />
-    </div>
+    </section>
   );
 }

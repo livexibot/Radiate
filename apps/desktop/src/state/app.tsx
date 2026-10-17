@@ -9,6 +9,7 @@ export interface ZapContext {
 
 export type Route =
   | { name: "home" }
+  | { name: "favorites" }
   | { name: "live"; groupId?: string | null; favorites?: boolean; channelId?: string }
   | { name: "guide"; chip?: string }
   | { name: "player"; target: PlayTarget; ctx?: ZapContext; resume?: number; title?: string }
@@ -64,10 +65,14 @@ export function sameTarget(a: PlayTarget | null | undefined, b: PlayTarget | nul
   return !!a && !!b && a.type === b.type && a.id === b.id;
 }
 
-function initialRoute(): Route | null {
+/** The screens a `#link` opens on; `#channel/<id>` plays that channel over Home. */
+function initialStack(): Route[] | null {
   const h = typeof location !== "undefined" ? location.hash.slice(1) : "";
+  const ch = /^channel\/(.+)$/.exec(h);
+  if (ch) return [{ name: "home" }, { name: "player", target: { type: "channel", id: decodeURIComponent(ch[1]) } }];
   const simple: Record<string, Route> = {
     home: { name: "home" },
+    favorites: { name: "favorites" },
     live: { name: "live" },
     guide: { name: "guide" },
     library: { name: "library" },
@@ -77,11 +82,11 @@ function initialRoute(): Route | null {
     settings: { name: "settings" },
     onboarding: { name: "onboarding" },
   };
-  return simple[h] ?? null;
+  return simple[h] ? [simple[h]] : null;
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [stack, setStack] = useState<Route[]>(() => [initialRoute() ?? { name: "home" }]);
+  const [stack, setStack] = useState<Route[]>(() => initialStack() ?? [{ name: "home" }]);
   const [sources, setSources] = useState<Source[] | null>(null);
   const [prefs, setPrefsState] = useState<Prefs | null>(null);
   const [usage, setUsage] = useState<ConnectionUsage[]>([]);
@@ -103,9 +108,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (opts?.replace) return [...s.slice(0, -1), r];
       const top = s[s.length - 1];
       if (top && JSON.stringify(top) === JSON.stringify(r)) return s;
-      // rail destinations reset the stack so Back never walks through unrelated screens
-      const railRoot = ["home", "live", "guide", "library", "movies", "series", "search", "settings"].includes(r.name);
-      const next = railRoot ? [r] : [...s, r];
+      // top bar destinations reset the stack so Back never walks through unrelated screens
+      const root = ["home", "favorites", "live", "guide", "library", "movies", "series", "search", "settings"].includes(r.name);
+      const next = root ? [r] : [...s, r];
       return next.slice(-30);
     });
   }, []);
@@ -145,12 +150,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setPrefsState(p);
       setUsage(u);
       setMpv(m);
-      if (srcs.length === 0) {
-        setStack([{ name: "onboarding" }]);
-      } else if (p?.lastChannelId && !initialRoute()) {
-        // resume the last channel on launch
-        setStack([{ name: "home" }, { name: "player", target: { type: "channel", id: p.lastChannelId } }]);
-      }
+      // launch always opens on Home (or the first route asked for); onboarding wins when there are no sources
+      if (srcs.length === 0) setStack([{ name: "onboarding" }]);
     })();
   }, []);
 

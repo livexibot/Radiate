@@ -1,6 +1,5 @@
 import { api, type VodItem } from "../api";
 import { VodCard } from "../components/Cards";
-import { Chips } from "../components/Chips";
 import { useApp, type LibraryTab } from "../state/app";
 import { useLoad } from "../state/hooks";
 import { VodGrid } from "./VodGrid";
@@ -22,13 +21,26 @@ export function Library({ tab }: { tab: LibraryTab }) {
 
   return (
     <div className="screen library">
-      <header className="topbar">
-        <h1>Library</h1>
-        <Chips items={TABS} value={tab} onChange={(id) => navigate({ name: "library", tab: id as LibraryTab }, { replace: true })} label="Library" />
-      </header>
+      <h1 className="sr-only">{tab === "movie" ? "Movies" : "Series"}</h1>
+      <div className="page-tabs" role="tablist" aria-label="Library">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={t.id === tab}
+            className={t.id === tab ? "page-tab on" : "page-tab"}
+            onClick={() => navigate({ name: "library", tab: t.id as LibraryTab }, { replace: true })}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
       {cont && cont.length > 0 ? (
         <section className="row">
-          <h2 className="row-title">Continue watching</h2>
+          <div className="row-head">
+            <h2 className="row-title">Continue watching</h2>
+          </div>
           <div className="cards">
             {cont.map((v) => (
               <VodCard key={v.id} item={v} onOpen={() => open(v)} sub={continueSub(v)} />
@@ -36,9 +48,7 @@ export function Library({ tab }: { tab: LibraryTab }) {
           </div>
         </section>
       ) : null}
-      <div className="library-grid">
-        <VodGrid key={tab} kind={tab} />
-      </div>
+      <VodGrid key={tab} kind={tab} />
     </div>
   );
 }

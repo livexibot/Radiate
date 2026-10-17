@@ -8,6 +8,7 @@ import { minutesLeft } from "../lib/time";
 import { useApp } from "../state/app";
 import { useLoad } from "../state/hooks";
 import { episodeTitle, resumeFraction } from "../player/vodLogic";
+import { DetailPoster } from "./MovieDetail";
 
 /** The episode to resume: the first one started but not finished, else the one after the last finished. */
 export function resumeEpisode(info: SeriesInfo): Episode | null {
@@ -41,39 +42,42 @@ export function SeriesDetail({ id }: { id: string }) {
         <Icon name="back" />
       </button>
       <div className="detail-body">
-        {error ? (
-          <p className="error-line">{error}</p>
-        ) : !info ? (
-          <div className="detail-info">
-            <Skeleton w="10rem" h="1.4rem" />
-            <Skeleton w="26rem" h="3rem" />
-            <Skeleton w="30rem" h="1rem" />
-          </div>
-        ) : (
-          <div className="detail-info">
-            <span className="pill ghost">Series</span>
-            <h1>{info.name}</h1>
-            <div className="facts">
-              {info.rating ? <span className="rt">★ {info.rating.toFixed(1)}</span> : null}
-              {years ? <span>{years}</span> : null}
-              <span>
-                {info.seasons.length} {info.seasons.length === 1 ? "season" : "seasons"}
-              </span>
+        <div className="detail-top">
+          {error ? (
+            <p className="error-line">{error}</p>
+          ) : !info ? (
+            <div className="detail-info">
+              <Skeleton w="10rem" h="1.4rem" />
+              <Skeleton w="26rem" h="3rem" />
+              <Skeleton w="30rem" h="1rem" />
             </div>
-            {info.plot ? <p>{info.plot}</p> : null}
-            <div className="btns">
-              {resume ? (
-                <button type="button" className="btn pri" onClick={() => play(resume)}>
-                  <Icon name="play" /> {(resume.progress ?? 0) > 0.01 ? "Resume" : "Play"} S{resume.season} · E{resume.episode}
-                </button>
-              ) : info.seasons[0]?.episodes[0] ? (
-                <button type="button" className="btn pri" onClick={() => play(info.seasons[0]!.episodes[0]!)}>
-                  <Icon name="play" /> Play S1 · E1
-                </button>
-              ) : null}
+          ) : (
+            <div className="detail-info">
+              <span className="detail-kind">Series</span>
+              <h1>{info.name}</h1>
+              <div className="facts">
+                {info.rating ? <span className="rt">★ {info.rating.toFixed(1)}</span> : null}
+                {years ? <span>{years}</span> : null}
+                <span>
+                  {info.seasons.length} {info.seasons.length === 1 ? "season" : "seasons"}
+                </span>
+              </div>
+              {info.plot ? <p>{info.plot}</p> : null}
+              <div className="btns">
+                {resume ? (
+                  <button type="button" className="btn pri" onClick={() => play(resume)}>
+                    <Icon name="play" /> {(resume.progress ?? 0) > 0.01 ? "Resume" : "Play"} S{resume.season} · E{resume.episode}
+                  </button>
+                ) : info.seasons[0]?.episodes[0] ? (
+                  <button type="button" className="btn pri" onClick={() => play(info.seasons[0]!.episodes[0]!)}>
+                    <Icon name="play" /> Play S1 · E1
+                  </button>
+                ) : null}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+          {info ? <DetailPoster name={info.name} src={info.poster} /> : null}
+        </div>
         {info ? (
           <div className="episodes-wrap">
             <div className="chips" role="tablist" aria-label="Seasons">

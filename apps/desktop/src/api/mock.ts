@@ -871,7 +871,7 @@ class MockBackend {
         return { sessionId: session.id };
       }
       case "app_info":
-        return { version: "0.2.2", dataDir: "~/.local/share/radiate" };
+        return { version: "0.3.0", dataDir: "~/.local/share/radiate" };
     }
   }
 }

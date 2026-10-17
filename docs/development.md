@@ -66,6 +66,26 @@ page.
   on YouTube: youtube.com's own page in a window of its own over the box,
   above Radiate's window, with no access to Radiate's commands.
 
+## Decisions (17 October 2026, 0.3.0)
+
+- Streams the webview can't decode (MKV files, AC-3 or MP2 sound, HEVC
+  or MPEG-2 pictures) are converted by ffmpeg, installed alongside the
+  app as `radiate-ffmpeg` (ffmpeg-static b6.1.1, GPLv3, pinned by
+  SHA-256 in `scripts/fetch-ffmpeg.sh`). ffmpeg reads the relay's own
+  address, so it is still the stream's one provider connection. The
+  player tries copying the picture first and converts it to H.264 only
+  when it has to. mpv stays optional ("Open in mpv"), never required.
+- Live TV starts with 10 s of picture buffered (20 s with the 20 s
+  setting, nothing with Minimal) and builds 5 s back up after a stall.
+  Previews start at once.
+- Navigation is a centred top bar: Home, Search, Favorites | Live TV,
+  Guide, Settings. Movies and series are reached from Home and Search.
+  Favorites is its own screen.
+- Launching opens Home, never the last channel (`#channel/<id>` opens a
+  channel explicitly; the end-to-end checks use it).
+- Colours, type sizes, spacing, radii and elevations are tokens in
+  `styles/base.css`; screens use the tokens.
+
 ## Layout
 
 ```

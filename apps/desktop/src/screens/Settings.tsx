@@ -28,9 +28,7 @@ export function Settings({ section }: { section?: SettingsSection }) {
   const current = section ?? "sources";
   return (
     <div className="screen settings">
-      <header className="topbar">
-        <h1>Settings</h1>
-      </header>
+      <h1 className="sr-only">Settings</h1>
       <div className="set">
         <nav className="setnav" aria-label="Settings sections">
           {SECTIONS.map((s) => (
@@ -523,14 +521,14 @@ function PlaybackSection() {
           <input type="checkbox" className="toggle" checked={prefs.muted} onChange={(e) => void setPrefs({ muted: e.target.checked })} aria-label="Muted" />
         </div>
         <div className="set-row">
-          <span>Latency</span>
+          <span>Live buffer</span>
           <Segmented
-            label="Latency"
+            label="Live buffer"
             value={prefs.latency ?? "normal"}
             options={[
-              { id: "low", label: "Low" },
-              { id: "normal", label: "Normal" },
-              { id: "stable", label: "Stable" },
+              { id: "low", label: "Minimal" },
+              { id: "normal", label: "10 s" },
+              { id: "stable", label: "20 s" },
             ]}
             onChange={(v) => void setPrefs({ latency: v })}
           />
@@ -645,7 +643,7 @@ function AboutSection() {
     <div className="set-stack">
       <section className="set-card about">
         <div className="about-head">
-          <div className="rail-logo">R</div>
+          <div className="brand-mark lg">R</div>
           <div>
             <h3>Radiate</h3>
             <span className="mute num">{data ? `Version ${data.version}` : " "}</span>

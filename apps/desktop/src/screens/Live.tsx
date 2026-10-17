@@ -121,13 +121,7 @@ export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
 
   return (
     <div className="screen fill live">
-      <header className="topbar">
-        <h1>Live TV</h1>
-        <label className="search-mini">
-          <Icon name="search" />
-          <input className="input" placeholder="Search all channels" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Search all channels" spellCheck={false} />
-        </label>
-      </header>
+      <h1 className="sr-only">Live TV</h1>
       <div className="live-grid">
         <nav className="groups" aria-label="Groups">
           <button type="button" className={!deciding && sel.favorites ? "group on" : "group"} onClick={() => pickGroup(null, true)}>
@@ -157,6 +151,13 @@ export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
         </nav>
 
         <div className="chlist" ref={listRef}>
+          <div className="chlist-head">
+            <label className="search-mini">
+              <Icon name="search" />
+              <input className="input" placeholder="Search all channels" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Search all channels" spellCheck={false} />
+            </label>
+            {list.total !== null && !(deciding && !everywhere) ? <span className="chlist-count num">{list.total.toLocaleString()}</span> : null}
+          </div>
           {list.total === null || (deciding && !everywhere) ? (
             <div className="chlist-skel">
               {Array.from({ length: 9 }, (_, i) => (
@@ -239,7 +240,7 @@ export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
               {nn[current.id]?.now ? (
                 <>
                   <span className="live-tag">Live</span>
-                  <h2>{nn[current.id]!.now!.title}</h2>
+                  <h2 className="live-title">{nn[current.id]!.now!.title}</h2>
                   <span className="mute num small">{timeRange(nn[current.id]!.now!.start, nn[current.id]!.now!.stop)}</span>
                   <Progress value={progressOf(nn[current.id]!.now!.start, nn[current.id]!.now!.stop, now)} />
                   {nn[current.id]!.now!.description ? <p className="desc">{nn[current.id]!.now!.description}</p> : null}
