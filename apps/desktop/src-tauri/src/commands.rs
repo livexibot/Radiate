@@ -290,6 +290,9 @@ pub struct PlayStarted {
     pub url: String,
     pub kind: StreamKind,
     pub title: String,
+    /// The same stream converted to something the player can decode, when
+    /// ffmpeg is there.
+    pub convert_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -395,6 +398,7 @@ async fn open_session(
         }
     }
     Ok(PlayStarted {
+        convert_url: state.hub.convert_url(&session.id),
         session_id: session.id,
         url: session.local_url,
         kind,
@@ -428,7 +432,7 @@ pub async fn connections_status(state: State<'_, AppState>) -> CmdResult<Vec<Con
 #[tauri::command]
 pub async fn mpv_available() -> CmdResult<bool> {
     Ok(
-        tauri::async_runtime::spawn_blocking(|| crate::mpv::find_mpv().is_some())
+        tauri::async_runtime::spawn_blocking(|| crate::tools::find_mpv().is_some())
             .await
             .unwrap_or(false),
     )
@@ -440,7 +444,7 @@ pub async fn mpv_open(
     state: State<'_, AppState>,
     target: PlayTarget,
 ) -> CmdResult<MpvStarted> {
-    let Some(mpv) = tauri::async_runtime::spawn_blocking(crate::mpv::find_mpv)
+    let Some(mpv) = tauri::async_runtime::spawn_blocking(crate::tools::find_mpv)
         .await
         .ok()
         .flatten()

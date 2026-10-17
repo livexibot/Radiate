@@ -379,6 +379,19 @@ class Run:
         self.s.js("location.hash = arguments[0]; location.reload();", hash_)
         time.sleep(2.5)
 
+    def watch(self, channel_id: str) -> None:
+        """Opens the player on a channel through its link (the app itself always opens on Home)."""
+        self.go(f"channel/{channel_id}")
+
+    @staticmethod
+    def converters() -> int:
+        """ffmpeg conversions the app is running (the fake provider's own ffmpegs don't use -muxpreload)."""
+        out = subprocess.run(["pgrep", "-fc", "muxpreload"], capture_output=True, text=True).stdout.strip()
+        return int(out or 0)
+
+    def vod_pos(self) -> str:
+        return self.s.js("const n = document.querySelector('input.seek:not(.live)'); return n ? n.getAttribute('aria-valuetext') : '';") or ""  # type: ignore[return-value]
+
     def in_use(self) -> tuple[int, int, int]:
         """(our sessions per the app, connections the provider sees, provider peak)"""
         ours = sum(u["inUse"] for u in self.s.invoke("connections_status") or [])  # type: ignore[union-attr]
@@ -432,7 +445,7 @@ class Run:
             lambda: next((x for x in (self.s.invoke("sources_list") or []) if x["status"] == "idle" and x["channelCount"] > 0), None),  # type: ignore[union-attr]
             timeout=60,
         )
-        r.ok(src["channelCount"] == 5 and src["movieCount"] == 4 and src["seriesCount"] == 1,
+        r.ok(src["channelCount"] == 6 and src["movieCount"] == 4 and src["seriesCount"] == 1,
              f"Xtream source added{' through onboarding' if used_ui else ''}: {src['channelCount']} channels, {src['movieCount']} movies, {src['seriesCount']} series, limit {src['maxConnections']}")
         if used_ui:
             # finish the groups step when there is one
@@ -441,6 +454,17 @@ class Run:
                 if self.s.click(xp_text("button", label)):
                     break
         self.s.invoke("prefs_set", {"patch": {"onboarded": True}})
+
+    def launch(self) -> None:
+        """Opening the app shows Home, even right after watching a channel."""
+        r = self.r
+        chans = self.s.invoke("channels_list", {"query": {"favoritesOnly": False, "includeHidden": False, "offset": 0, "limit": 5}})["items"]  # type: ignore[index]
+        self.s.invoke("prefs_set", {"patch": {"lastChannelId": chans[0]["id"]}})
+        self.home()
+        time.sleep(3)
+        r.ok(self.s.video() is None and not self.s.exists("//*[contains(@class,'player')]"), "the app opens on Home, not the last channel")
+        r.ok(self.in_use()[0] == 0, "nothing starts playing on launch")
+        self.shot("launch-home")
 
     def movies(self) -> None:
         r = self.r
@@ -567,17 +591,63 @@ class Run:
         self.leave_player()
 
     def mkv(self) -> None:
+        """A Matroska movie with AC-3 sound, which the webview can't play, plays converted by ffmpeg:
+        picture and sound, its full length, seeking past what has loaded, one provider connection,
+        and no ffmpeg left behind."""
         r = self.r
         self.open_movie("Matroska Movie")
         self.s.click(xp_text("button", "Play"))
-        txt = self.s.wait("mkv card", lambda: (t := self.s.text()) and "can't play this format" in t and t, timeout=20)
-        r.ok("Install mpv" in txt or "Open in mpv" in txt, "mkv shows the mpv card ('Install mpv to play it.' without mpv)")
-        self.shot("mkv-card")
-        time.sleep(1)
+        v = self.wait_playing(min_t=2, timeout=40)
+        t = self.s.text()
+        r.ok(v["w"] > 0 and "format" not in t, f"mkv plays converted ({v['w']} px wide, at {v['t']} s), no format card")
+        r.ok(self.converters() == 1, f"one conversion running ({self.converters()})")
+        pos = self.s.wait("length", lambda: (p := self.vod_pos()) and p.endswith("of 5:00") and p, timeout=20)
+        r.ok(True, f"the converter tells the length: {pos}")
+        vb = self.s.video() or {}
+        loaded = vb["buffered"][-1][1] if vb.get("buffered") else 0
+        # Past what has loaded: the converter starts again from there.
+        self.s.set_range("input.seek:not(.live)", 240)
+        pos = self.s.wait("far seek", lambda: (p := self.vod_pos()) and p.startswith("4:0") and (x := self.s.video()) and not x["paused"] and x["t"] > 1 and p, timeout=40)
+        r.ok(loaded < 200, f"seeking to 4:00 with {round(loaded)} s loaded plays from there: {pos}")
+        time.sleep(3)
+        p2 = self.vod_pos()
+        r.ok(p2.startswith("4:0") or p2.startswith("4:1"), f"and carries on: {p2}")
+        ours, prov, peak = self.in_use()
+        r.ok(ours == 1 and prov <= 1, f"mkv: one connection (app {ours}, provider {prov})")
+        self.s.key("ArrowLeft")
+        time.sleep(2)
+        back = self.vod_pos()
+        r.ok(back.startswith("3:5") or back.startswith("4:0"), f"Left goes back 10 s: {back}")
+        self.shot("mkv-converted")
         self.leave_player()
-        time.sleep(1.5)
+        time.sleep(2)
         ours, prov, _ = self.in_use()
         r.ok(ours == 0, f"mkv: no connection left open (app {ours}, provider {prov})")
+        r.ok(self.converters() == 0, f"no ffmpeg left running ({self.converters()})")
+
+    def convert(self) -> None:
+        """An MPEG-2 channel with MP2 sound (no picture the webview can read) plays converted to
+        H.264, live, on one connection; leaving stops ffmpeg."""
+        r = self.r
+        self.s.invoke("prefs_set", {"patch": {"liveFormat": "ts", "latency": "normal"}})
+        chans = self.s.invoke("channels_list", {"query": {"favoritesOnly": False, "includeHidden": False, "offset": 0, "limit": 50}})["items"]  # type: ignore[index]
+        retro = next(c for c in chans if c["name"] == "Retro Sports SD")
+        self.watch(retro["id"])
+        v = self.wait_playing(min_t=2, timeout=60)
+        r.ok(v["w"] > 0, f"MPEG-2 channel plays with a picture ({v['w']} px wide)")
+        r.ok(self.converters() == 1, f"converted by ffmpeg ({self.converters()} running)")
+        samples = []
+        for _ in range(6):
+            time.sleep(1)
+            samples.append((self.s.video() or {}).get("t"))
+        steps = [round(b - a, 2) for a, b in zip(samples, samples[1:]) if a is not None and b is not None]
+        r.ok(all(0.6 <= x <= 1.4 for x in steps), f"converted live plays smoothly: {steps}")
+        ours, prov, _ = self.in_use()
+        r.ok(ours == 1 and prov == 1, f"one connection while converting (app {ours}, provider {prov})")
+        self.shot("convert-live")
+        self.leave_player()
+        time.sleep(2)
+        r.ok(self.converters() == 0 and self.in_use()[0] == 0, f"leaving stops ffmpeg ({self.converters()}) and the stream ({self.in_use()[0]})")
 
     def series(self) -> None:
         r = self.r
@@ -665,6 +735,8 @@ class Run:
         r.ok(ours == 1 and prov == 1 and st1["peak"] <= st0["peak"] + 0 and not st1["refused"],
              f"Watch moves the preview into the full player in the same session (app {ours}, provider {prov}, upstream re-requested {opened_after - opened_before}x, peak {st1['peak']})")
         r.ok(True, f"live MPEG-TS plays (currentTime {v['t']})")
+        ahead0 = round(v["buffered"][-1][1] - v["t"], 2) if v.get("buffered") else 0
+        r.ok(ahead0 >= 8, f"it started with {ahead0} s buffered ahead (asked for 10)")
         samples = []
         for _ in range(10):
             time.sleep(1)
@@ -688,14 +760,17 @@ class Run:
         self.shot("live-after-zap")
         t = self.s.text()
         r.ok("stream stopped" not in t and "connections" not in t.lower(), "no failure or limit card after zapping")
+        x = self.s.video() or {}
+        ahead = round(x["buffered"][-1][1] - x["t"], 2) if x.get("buffered") else 0
+        r.ok(ahead >= 8, f"after zapping: {ahead} s buffered ahead of the picture")
         # latency "stable" holds a deeper buffer on live MPEG-TS
         self.s.invoke("prefs_set", {"patch": {"latency": "stable"}})
         self.s.key("ArrowDown")
-        self.s.wait("stable playing", lambda: (x := self.s.video()) and x["rs"] >= 2 and x["t"] > 3 and x, timeout=40)
+        self.s.wait("stable playing", lambda: (x := self.s.video()) and x["rs"] >= 2 and x["t"] > 3 and x, timeout=60)
         time.sleep(3)
         x = self.s.video() or {}
         ahead = round(x["buffered"][-1][1] - x["t"], 2) if x.get("buffered") else 0
-        r.ok(ahead >= 2, f"latency stable: {ahead} s buffered ahead of the picture")
+        r.ok(ahead >= 16, f"latency stable: {ahead} s buffered ahead of the picture")
         self.s.invoke("prefs_set", {"patch": {"latency": "normal"}})
         self.leave_player()
         time.sleep(3)
@@ -719,9 +794,11 @@ class Run:
             return round(x["buffered"][-1][1] - x["t"], 2) if x.get("buffered") else 0.0
 
         for fmt in ("ts", "hls"):
-            self.s.invoke("prefs_set", {"patch": {"liveFormat": fmt, "latency": "normal", "lastChannelId": chans[1]["id"]}})
-            self.home()
+            self.s.invoke("prefs_set", {"patch": {"liveFormat": fmt, "latency": "normal"}})
+            self.watch(chans[1]["id"])
             self.wait_playing(min_t=1, timeout=40)
+            first = ahead()
+            r.ok(first >= 8, f"{fmt}: started with {first} s buffered ahead (asked for 10)")
             self.s.wait("live bar", lambda: behind() is not None, timeout=10)
             time.sleep(26)
             base = ahead()
@@ -822,18 +899,17 @@ class Run:
         provider_down(self.args)
         provider_up(self.args, ["--max", "1", "--report-lag", "30"])
         try:
-            self.s.invoke("prefs_set", {"patch": {"liveFormat": "ts", "latency": "normal"}})
+            # This is about the limit, not buffering: start at once.
+            self.s.invoke("prefs_set", {"patch": {"liveFormat": "ts", "latency": "low"}})
             chans = self.s.invoke("channels_list", {"query": {"favoritesOnly": False, "includeHidden": False, "offset": 0, "limit": 10}})["items"]  # type: ignore[index]
             # a start re-reads the account, so the app knows the limit is 1 from here on
             started = self.s.invoke("play_start", {"target": {"type": "channel", "id": chans[0]["id"]}})
             self.s.invoke("play_stop", {"sessionId": started["sessionId"]})  # type: ignore[index]
             src = next(x for x in (self.s.invoke("sources_list") or []) if x.get("server", "").endswith(f":{port}"))  # type: ignore[union-attr]
             r.ok(src["maxConnections"] == 1, f"account limit is now {src['maxConnections']}")
-            self.s.invoke("prefs_set", {"patch": {"lastChannelId": chans[0]["id"]}})
-
             # more than any stream we closed lately: really someone else
             phantom(20)
-            self.home()
+            self.watch(chans[0]["id"])
             self.s.wait("limit card", lambda: card in self.s.text() and "Checking again in" in self.s.text(), timeout=30)
             t = self.s.text()
             r.ok(elsewhere in t and "Play anyway" in t and "Try again" in t and "Stop " not in t,
@@ -864,7 +940,7 @@ class Run:
             # Play anyway: the provider decides
             self.leave_player()
             phantom(20)
-            self.home()
+            self.watch(chans[0]["id"])
             self.s.wait("limit card again", lambda: card in self.s.text(), timeout=30)
             self.s.click(xp_text("button", "Play anyway"))
             self.wait_playing(min_t=0.5, timeout=40)
@@ -874,6 +950,7 @@ class Run:
             r.ok(ours == 1 and peak <= 1 and not st["refused"], f"never over the limit: app {ours}, provider {prov}, peak {peak}, refused {len(st['refused'])}")
         finally:
             phantom(0)
+            self.s.invoke("prefs_set", {"patch": {"latency": "normal"}})
             self.go("settings")
             provider_down(self.args)
             provider_up(self.args, ["--max", str(self.args.max)])
@@ -887,8 +964,7 @@ class Run:
         try:
             self.s.invoke("prefs_set", {"patch": {"liveFormat": "ts", "latency": "normal"}})
             chans = self.s.invoke("channels_list", {"query": {"favoritesOnly": False, "includeHidden": False, "offset": 0, "limit": 5}})["items"]  # type: ignore[index]
-            self.s.invoke("prefs_set", {"patch": {"lastChannelId": chans[0]["id"]}})
-            self.home()
+            self.watch(chans[0]["id"])
             self.wait_playing(min_t=1, timeout=40)
             stuck = self.s.wait("picture stops", lambda: (a := self.s.video()) and (time.sleep(1.5) or True) and (b := self.s.video()) and a["t"] == b["t"] and b, timeout=40)
             t0 = time.time()
@@ -914,8 +990,7 @@ class Run:
             "reactorOverlay": {"size": "m", "side": "left", "volume": 60, "delay": 0},
         }})
         chans = self.s.invoke("channels_list", {"query": {"favoritesOnly": False, "includeHidden": False, "offset": 0, "limit": 5}})["items"]  # type: ignore[index]
-        self.s.invoke("prefs_set", {"patch": {"lastChannelId": chans[0]["id"]}})
-        self.home()
+        self.watch(chans[0]["id"])
         self.wait_playing(min_t=1, timeout=40)
         self.s.js("window.__yt = []; window.addEventListener('message', (e) => { if (e.data && e.data.radiate === 'yt') window.__yt.push(e.data.data); });")
 
@@ -977,7 +1052,7 @@ class Run:
         self.shot("reactor-moved")
         # next time: the same place
         self.leave_player()
-        self.home()
+        self.watch(chans[0]["id"])
         self.wait_playing(min_t=0.5, timeout=40)
         self.s.key("r")
         again = self.s.wait("reactor box again", lambda: (x := box()) and x["src"] and x, timeout=15)
@@ -1078,7 +1153,7 @@ class Run:
         r.ok(not st["refused"] and st["peak"] <= 2, f"provider limit never exceeded (peak {st['peak']}, refused {len(st['refused'])})")
 
 
-SCENARIOS = ["source", "movies", "seek", "resume", "hlsvod", "mkv", "series", "live", "rewind", "search", "reactor", "limit", "stall"]
+SCENARIOS = ["source", "launch", "movies", "seek", "resume", "hlsvod", "mkv", "convert", "series", "live", "rewind", "search", "reactor", "limit", "stall"]
 
 
 def run(args: argparse.Namespace) -> None:

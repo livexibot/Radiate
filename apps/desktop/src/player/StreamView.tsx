@@ -59,6 +59,7 @@ export function StreamView({ target, backdrop, muted, compact, className = "", c
           muted={muted ?? prefs?.muted ?? false}
           live={target?.type === "channel"}
           latency={prefs?.latency}
+          startBuffer={false}
           onFatal={(f) => (f.decode ? setFatal(f) : fail(f.message))}
         />
       ) : null}

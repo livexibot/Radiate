@@ -29,6 +29,7 @@
 //! response it opened and hands it to the player's first read, so probing
 //! never costs a second connection.
 
+mod convert;
 pub mod embed;
 mod failure;
 mod hls;
@@ -37,6 +38,7 @@ mod sniff;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -44,6 +46,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
+pub use convert::{ffmpeg_args, parse_duration, VideoMode};
 pub use failure::plain_failure_message;
 pub use hls::rewrite_playlist;
 pub use sniff::sniff_kind;
@@ -200,6 +203,8 @@ pub struct HubConfig {
     pub stall_after: Duration,
     /// How long a closed session may still be in the provider's count.
     pub recent_close_window: Duration,
+    /// ffmpeg, for streams the player can't decode. `None` turns conversion off.
+    pub ffmpeg: Option<PathBuf>,
 }
 
 impl Default for HubConfig {
@@ -215,6 +220,7 @@ impl Default for HubConfig {
             permit_wait: Duration::from_secs(30),
             stall_after: Duration::from_secs(4),
             recent_close_window: Duration::from_secs(90),
+            ffmpeg: None,
         }
     }
 }
@@ -314,6 +320,18 @@ impl StreamHub {
     /// The address the relay listens on.
     pub fn local_addr(&self) -> SocketAddr {
         self.inner.addr
+    }
+
+    /// Where the player reads `session_id` converted by ffmpeg (MPEG-TS with
+    /// AAC sound; add `?v=h264` to convert the picture too, `&t=` to start a
+    /// file further in), and `<that>/../info` for its length. `None` when
+    /// there is no ffmpeg.
+    pub fn convert_url(&self, session_id: &str) -> Option<String> {
+        self.inner
+            .cfg
+            .ffmpeg
+            .as_ref()
+            .map(|_| format!("http://{}/s/{session_id}/c/stream.ts", self.inner.addr))
     }
 
     /// The local page that holds YouTube's player for the reactor overlay.

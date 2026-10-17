@@ -233,6 +233,8 @@ export interface PlayStarted {
   url: string;
   kind: StreamKind;
   title: string;
+  /** The same stream converted for the built-in player (by the bundled ffmpeg), if available. */
+  convertUrl?: string | null;
 }
 
 export interface MpvStarted {

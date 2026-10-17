@@ -20,6 +20,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
+use crate::convert::ConvertState;
 use crate::failure::plain_failure_message;
 use crate::sniff::{content_type_for, is_playlist, kind_from_content_type, sniff_kind};
 use crate::{hls, now_ms, HubConfig, Inner, OpenRequest, SessionInfo, StreamEvent, StreamKind};
@@ -78,7 +79,7 @@ pub(crate) struct Session {
     allowed: Mutex<AllowList>,
     /// One upstream connection at a time.
     permit: Arc<Semaphore>,
-    cancel: CancellationToken,
+    pub(crate) cancel: CancellationToken,
     /// The current preemptible (non-HLS) player request.
     current: Mutex<Option<CancellationToken>>,
     prefetch: Mutex<Option<Prefetched>>,
@@ -90,6 +91,7 @@ pub(crate) struct Session {
     waiting_since: AtomicU64,
     /// Whether a request has gone to the provider.
     dialed: AtomicBool,
+    pub(crate) convert: Mutex<ConvertState>,
 }
 
 impl Session {
@@ -152,6 +154,7 @@ impl Session {
             bytes: AtomicU64::new(0),
             waiting_since: AtomicU64::new(0),
             dialed: AtomicBool::new(false),
+            convert: Mutex::new(ConvertState::default()),
         }
     }
 
@@ -175,7 +178,7 @@ impl Session {
         self.current.lock().unwrap().take();
     }
 
-    fn kind(&self) -> StreamKind {
+    pub(crate) fn kind(&self) -> StreamKind {
         *self.kind.lock().unwrap()
     }
 
@@ -189,7 +192,7 @@ impl Session {
         self.created.elapsed().as_millis() as u64
     }
 
-    fn touch(&self) {
+    pub(crate) fn touch(&self) {
         self.last_activity
             .store(self.elapsed_ms(), Ordering::Relaxed);
     }
@@ -215,10 +218,10 @@ impl Session {
 
 /// Counts a player request or response body in progress; the session is not
 /// idle while any exist.
-struct ActiveGuard(Arc<Session>);
+pub(crate) struct ActiveGuard(Arc<Session>);
 
 impl ActiveGuard {
-    fn new(s: &Arc<Session>) -> ActiveGuard {
+    pub(crate) fn new(s: &Arc<Session>) -> ActiveGuard {
         s.active.fetch_add(1, Ordering::SeqCst);
         s.touch();
         ActiveGuard(s.clone())
@@ -416,6 +419,10 @@ pub(crate) fn spawn_server(inner: Arc<Inner>, listener: tokio::net::TcpListener)
     let shutdown = inner.shutdown.clone();
     let app = Router::new()
         .route("/s/{id}/r/{name}", get(resource).options(preflight))
+        .route(
+            "/s/{id}/c/{name}",
+            get(crate::convert::serve).options(preflight),
+        )
         .route("/s/{id}/{name}", get(root).options(preflight))
         .route("/yt", get(crate::embed::serve))
         .fallback(|| async { StatusCode::NOT_FOUND })
@@ -438,7 +445,7 @@ pub(crate) fn host_ok(inner: &Inner, headers: &HeaderMap) -> bool {
     }
 }
 
-fn with_common(mut r: Response) -> Response {
+pub(crate) fn with_common(mut r: Response) -> Response {
     let h = r.headers_mut();
     h.insert(
         header::ACCESS_CONTROL_ALLOW_ORIGIN,

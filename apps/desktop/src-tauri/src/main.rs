@@ -4,9 +4,9 @@
 mod background;
 mod commands;
 mod error;
-mod mpv;
 mod secrets;
 mod state;
+mod tools;
 mod updater;
 mod youtube;
 
@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use radiate_core::Core;
-use radiate_stream::StreamHub;
+use radiate_stream::{HubConfig, StreamHub};
 use tauri::{Manager, RunEvent, WindowEvent};
 
 use crate::state::AppState;
@@ -26,7 +26,16 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     let core = Arc::new(Core::open(&data_dir, secrets::secret_store())?);
     let user_agent = format!("Radiate/{}", app.package_info().version);
-    let hub = tauri::async_runtime::block_on(StreamHub::start(Some(user_agent)))?;
+    let ffmpeg = tools::find_ffmpeg();
+    match &ffmpeg {
+        Some(p) => tracing::info!("converter: {}", p.display()),
+        None => tracing::warn!("no ffmpeg found; streams the player can't decode won't play"),
+    }
+    let hub = tauri::async_runtime::block_on(StreamHub::start_with(HubConfig {
+        user_agent: Some(user_agent),
+        ffmpeg,
+        ..HubConfig::default()
+    }))?;
     state::restore_recent_closes(&hub, &data_dir);
 
     background::forward_stream_events(handle.clone(), hub.clone());

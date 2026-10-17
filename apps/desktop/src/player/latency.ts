@@ -1,8 +1,10 @@
-// How the latency preference maps to the two web players. Low stays close to the live edge and
-// catches up quickly; normal trades a little delay for smooth playback; stable keeps a deep buffer
-// for shaky connections. Catching up is done by playing slightly faster, not by jumping, so a
-// match never skips; only "low" also jumps when it falls far behind. Live TV also keeps the last
-// few minutes it played, so it can be rewound; while you watch from behind nothing catches up.
+// How the latency preference maps to the two web players. Normal (the default) starts a channel
+// with at least 10 seconds buffered ahead and keeps about that much, so a slow moment at the
+// provider never stops the picture; stable keeps twice as much for shaky connections; low stays
+// close to the live edge and may buffer. Catching up is done by playing slightly faster, not by
+// jumping, so a match never skips; only "low" also jumps when it falls far behind. Live TV also
+// keeps the last few minutes it played, so it can be rewound; while you watch from behind nothing
+// catches up.
 import type { LatencyPref } from "../api";
 
 /** Seconds of live TV kept to go back to (less when the stream is too big for the browser's memory). */
@@ -19,23 +21,30 @@ export function latencyOf(pref: unknown): LatencyPref {
 export function hlsConfig(latency: LatencyPref, live: boolean, rewind = false): Record<string, unknown> {
   if (!live) return { enableWorker: true, backBufferLength: 30, lowLatencyMode: false, maxBufferLength: 30, maxMaxBufferLength: 120 };
   const base = { enableWorker: true, backBufferLength: rewind ? REWIND_SECS : 30 };
+  // Normal and stable start this many seconds behind the edge, so everything up to the edge is
+  // there to load before the picture starts (see startBufferSecs).
   switch (latency) {
     case "low":
       return { ...base, lowLatencyMode: true, liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 5, maxLiveSyncPlaybackRate: 1.15, maxBufferLength: 10 };
     case "stable":
-      return { ...base, lowLatencyMode: false, liveSyncDurationCount: 5, liveMaxLatencyDurationCount: 12, maxLiveSyncPlaybackRate: 1.05, maxBufferLength: 40 };
+      return { ...base, lowLatencyMode: false, liveSyncDuration: 24, liveMaxLatencyDuration: 75, maxLiveSyncPlaybackRate: 1.03, maxBufferLength: 60 };
     default:
-      return { ...base, lowLatencyMode: false, liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 8, maxLiveSyncPlaybackRate: 1.08, maxBufferLength: 20 };
+      return { ...base, lowLatencyMode: false, liveSyncDuration: 12, liveMaxLatencyDuration: 45, maxLiveSyncPlaybackRate: 1.05, maxBufferLength: 30 };
   }
 }
 
 /**
- * Seconds of live MPEG-TS to gather before playback starts. A real-time stream only ever arrives
- * as fast as it plays, so this is the only way to hold a deeper buffer; it delays the start (and
- * every zap) by as much, so only "stable" asks for it.
+ * Seconds of live TV buffered ahead before a channel starts playing. HLS loads that from the
+ * playlist in a moment; a live MPEG-TS stream only arrives as fast as it plays (plus whatever
+ * the provider sends at once), so it waits up to this long.
  */
 export function startBufferSecs(latency: LatencyPref): number {
-  return latency === "stable" ? 3 : 0;
+  return latency === "low" ? 0 : latency === "stable" ? 20 : 10;
+}
+
+/** Seconds built back up after the picture ran out of stream, before it plays on. */
+export function rebufferSecs(latency: LatencyPref): number {
+  return latency === "low" ? 0 : latency === "stable" ? 10 : 5;
 }
 
 /**
@@ -68,9 +77,9 @@ export function liveFollow(latency: LatencyPref): LiveFollow {
     case "low":
       return { maxLatency: 2, targetLatency: 1.2, rate: 1.15, jumpAbove: 5, keep: 1.5 };
     case "stable":
-      return { maxLatency: 10, targetLatency: 6, rate: 1.05, jumpAbove: null, keep: 0 };
+      return { maxLatency: 32, targetLatency: 24, rate: 1.03, jumpAbove: null, keep: 0 };
     default:
-      return { maxLatency: 4, targetLatency: 2.5, rate: 1.1, jumpAbove: null, keep: 0 };
+      return { maxLatency: 18, targetLatency: 12, rate: 1.05, jumpAbove: null, keep: 0 };
   }
 }
 
@@ -86,7 +95,13 @@ export function followStep(latency: number, rate: number, f: LiveFollow): { rate
  * hls.js settings while watching live TV from behind: never catch up (no faster playback, no
  * jumps), and keep loading up to the edge so nothing slides out of the playlist before it plays.
  */
-export const HLS_BEHIND = { maxLiveSyncPlaybackRate: 1, liveMaxLatencyDurationCount: Infinity, maxBufferLength: REWIND_SECS + 30, maxMaxBufferLength: REWIND_SECS + 30 } as const;
+export const HLS_BEHIND = {
+  maxLiveSyncPlaybackRate: 1,
+  liveMaxLatencyDuration: Infinity,
+  liveMaxLatencyDurationCount: Infinity,
+  maxBufferLength: REWIND_SECS + 30,
+  maxMaxBufferLength: REWIND_SECS + 30,
+} as const;
 
 /**
  * Settings while the match is held back to line up with a reactor: never catch up (no faster
@@ -95,5 +110,7 @@ export const HLS_BEHIND = { maxLiveSyncPlaybackRate: 1, liveMaxLatencyDurationCo
  */
 export function holdConfig(cfg: Record<string, unknown>, player: "hls" | "mpegts"): Record<string, unknown> {
   if (player === "mpegts") return { ...cfg, liveSync: false, liveBufferLatencyChasing: false };
-  return { ...cfg, lowLatencyMode: false, maxLiveSyncPlaybackRate: 1, liveMaxLatencyDurationCount: Infinity, maxBufferLength: 90, maxMaxBufferLength: 120 };
+  // hls.js refuses a mix of the seconds and segment-count settings.
+  const never = cfg.liveSyncDuration !== undefined ? { liveMaxLatencyDuration: Infinity } : { liveMaxLatencyDurationCount: Infinity };
+  return { ...cfg, ...never, lowLatencyMode: false, maxLiveSyncPlaybackRate: 1, maxBufferLength: 90, maxMaxBufferLength: 120 };
 }

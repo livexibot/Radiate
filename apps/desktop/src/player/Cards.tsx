@@ -127,7 +127,7 @@ export function FailCard({ message, onRetry, onAnother, compact }: { message: st
   );
 }
 
-/** For formats the webview can't decode: hand the stream to mpv when it's installed. */
+/** For a format neither the player nor the converter could play: hand it to mpv when it's installed. */
 export function UnsupportedCard({
   target,
   message,
@@ -168,9 +168,7 @@ export function UnsupportedCard({
             <Icon name="external" /> Open in mpv
           </button>
         </div>
-      ) : (
-        <span className="state-sub">Install mpv to play it.</span>
-      )}
+      ) : null}
     </div>
   );
 }

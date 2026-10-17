@@ -9,3 +9,5 @@ apps/desktop/src-tauri/gen/
 *.pfx
 *.p12
 *.key
+# ffmpeg for the installers, fetched by scripts/fetch-ffmpeg.sh
+apps/desktop/src-tauri/binaries/

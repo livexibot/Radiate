@@ -36,6 +36,22 @@ make movie_faststart.mp4 300 testsrc2 330 -movflags +faststart
 make movie_lateindex.mp4 300 testsrc 550   # moov atom at the end
 make movie.mkv 60 testsrc2 220 -f matroska
 
+# Formats the webview can't play, for the converter: a 5 minute Matroska movie with AC-3 sound,
+# and MPEG-2 TV with MP2 sound (an old SD channel), looped live by the server.
+if [[ ! -s movie_ac3.mkv ]]; then
+  # shellcheck disable=SC2046
+  "${FF[@]}" $(src 300 testsrc2 220) "${V[@]}" -c:a ac3 -b:a 192k -ar 48000 -ac 2 -f matroska movie_ac3.tmp.mkv
+  mv movie_ac3.tmp.mkv movie_ac3.mkv
+  echo "made movie_ac3.mkv"
+fi
+if [[ ! -s live_mpeg2.ts ]]; then
+  # shellcheck disable=SC2046
+  "${FF[@]}" $(src 60 smptebars 880) -c:v mpeg2video -b:v 2M -g 12 -pix_fmt yuv420p -c:a mp2 -b:a 192k -ar 48000 -ac 2 \
+    -f mpegts -mpegts_flags +resend_headers live_mpeg2.tmp.ts
+  mv live_mpeg2.tmp.ts live_mpeg2.ts
+  echo "made live_mpeg2.ts"
+fi
+
 # HLS VOD: 2 minutes in 4 s segments with an ENDLIST.
 if [[ ! -s hlsvod/index.m3u8 ]]; then
   mkdir -p hlsvod

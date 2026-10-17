@@ -87,12 +87,15 @@ jobs:
       - name: Install web dependencies
         run: npm ci
         working-directory: apps/desktop
+      - name: Fetch the ffmpeg the app installs alongside
+        shell: bash
+        run: scripts/fetch-ffmpeg.sh ${{ startsWith(matrix.platform, 'windows') && 'windows' || startsWith(matrix.platform, 'macos') && 'macos' || 'linux' }}
       # Pull requests have no signing key, so skip the signed update files.
       - uses: tauri-apps/tauri-action@v0
         id: tauri
         with:
           projectPath: apps/desktop
-          args: ${{ matrix.args }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
+          args: ${{ matrix.args }} --config '{"bundle":{"createUpdaterArtifacts":false,"externalBin":["binaries/radiate-ffmpeg"],"resources":{"licenses/FFMPEG.txt":"licenses/FFMPEG.txt","licenses/GPL-3.0.txt":"licenses/GPL-3.0.txt"}}}'
       - uses: actions/upload-artifact@v4
         with:
           name: radiate-${{ matrix.platform }}

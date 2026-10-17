@@ -62,8 +62,11 @@ Radiate is a Tauri app. A Rust core parses playlists and guides as they
 download and keeps them in a local SQLite index. The interface is a web
 page inside the app's window. Streams go through a small relay inside
 Radiate, on your computer only, which is also where your provider's
-connection limit is kept. Formats the built-in player can't handle open in
-[mpv](https://mpv.io) when it's installed.
+connection limit is kept. Formats the built-in player can't decode (MKV
+files, AC-3 or MP2 sound, HEVC or MPEG-2 pictures) are converted on the fly
+by a copy of [FFmpeg](https://ffmpeg.org) that Radiate installs next to
+itself (GPLv3, see [its notice](apps/desktop/src-tauri/licenses/FFMPEG.txt)),
+on the same connection, so they play inside the app.
 
 Reactors are YouTube's official embedded player, loaded only when you add
 or show one. Radiate never downloads or records YouTube's video.

@@ -202,7 +202,7 @@ fuzzy score (token Jaro-Winkler / trigram) above 0.88.
 ## 2. radiate-stream (Rust library)
 
 A relay on `127.0.0.1:<random port>` (hyper or axum) that the player (the
-webview's `<video>`, or mpv) reads from. It exists for three reasons: the
+webview's `<video>`, ffmpeg converting for it, or mpv) reads from. It exists for three reasons: the
 webview can't read provider streams directly (CORS, mixed content), it is
 the one place that counts connections per source, and it can tell the UI
 plainly why a stream failed.
@@ -217,6 +217,7 @@ impl StreamHub {
   pub fn usage(&self) -> Vec<ConnectionUsage>;            // per source
   pub fn subscribe(&self) -> broadcast::Receiver<StreamEvent>; // health and failures
   pub fn embed_url(&self, target: &embed::EmbedTarget) -> String; // reactor page, see below
+  pub fn convert_url(&self, session_id: &str) -> Option<String>;  // the session converted by ffmpeg; None without ffmpeg
   pub fn recent_closes(&self) -> Vec<RecentClose>;         // saved on quit
   pub fn remember_closes(&self, closes: Vec<RecentClose>); // restored on start
 }
@@ -228,6 +229,21 @@ pub struct SessionInfo { id, source_id, title, started_at: i64 }
 pub struct ConnectionUsage { source_id, in_use: u32, limit: Option<u32> }
 pub enum StreamEvent { Health { session_id, bitrate_kbps: u32, stalled: bool }, Failed { session_id, http_status: Option<u16>, message: String /* plain language */ }, Closed { session_id } }
 ```
+
+The converter (`HubConfig::ffmpeg`, found by the shell: the `radiate-ffmpeg`
+installed next to the app, else an ffmpeg on the computer):
+- `GET /s/{id}/c/stream.ts?v=copy|h264&t=SECS` runs ffmpeg on the
+  session's own root URL, so it is still the session's one provider
+  connection, and answers MPEG-TS with AAC sound (`v=copy` keeps the
+  picture, `v=h264` converts it too; `t` starts a file further in). One
+  conversion per session: a new request stops the previous ffmpeg, and
+  ffmpeg stops when the player goes away or the session closes.
+- `GET /s/{id}/c/info` answers `{"duration": SECS | null}` once ffmpeg
+  has read a file's length.
+- The player tries the stream itself first. When it can't decode it, it
+  plays `v=copy`, then `v=h264` (straight to `v=h264` when the picture is
+  the problem); MKV goes straight to the converter. A converted movie
+  restarts the converter to seek past what it has loaded.
 
 Rules:
 - One session = one upstream connection at a time. HLS playlists are
@@ -302,7 +318,7 @@ messages back up as `{ radiate: "yt", data }`.
 | `progress_set` | `{ itemId, positionSecs, durationSecs }` | |
 | `continue_watching` | `{ limit }` | `VodItem[]` |
 | `search_all` | `{ query, limit }` | `SearchResults` |
-| `play_start` | `{ target: PlayTarget, ignoreProviderCount?: boolean }` | `{ sessionId, url, kind, title }` or error `{ code: "connection_limit", message, sourceId, limit, inUse, sessions: SessionInfo[], external }` |
+| `play_start` | `{ target: PlayTarget, ignoreProviderCount?: boolean }` | `{ sessionId, url, kind, title, convertUrl }` (`convertUrl`: the stream converted by ffmpeg, or null without it) or error `{ code: "connection_limit", message, sourceId, limit, inUse, sessions: SessionInfo[], external }` |
 | `play_stop` | `{ sessionId }` | |
 | `connections_status` | | `ConnectionUsage[]` |
 | `prefs_get` | | `Prefs` |

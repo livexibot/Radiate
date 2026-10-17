@@ -1,4 +1,5 @@
-//! Finding mpv on this computer.
+//! Finding the programs Radiate hands streams to: mpv when the user has it,
+//! and ffmpeg, which converts streams the built-in player can't decode.
 
 use std::path::{Path, PathBuf};
 
@@ -83,17 +84,57 @@ fn common_locations() -> Vec<PathBuf> {
     v
 }
 
+fn on_path(names: &[&str]) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .flat_map(|dir| names.iter().map(move |n| dir.join(n)))
+        .find(|p| is_file(p))
+}
+
 /// The mpv executable, from PATH first, then the usual install locations.
 pub fn find_mpv() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&path) {
-            for name in exe_names() {
-                let p = dir.join(name);
-                if is_file(&p) {
-                    return Some(p);
-                }
+    on_path(exe_names()).or_else(|| common_locations().into_iter().find(|p| is_file(p)))
+}
+
+/// ffmpeg: the copy installed with Radiate (next to its executable), else
+/// one on this computer.
+pub fn find_ffmpeg() -> Option<PathBuf> {
+    let bundled = std::env::current_exe().ok().and_then(|exe| {
+        let name = if cfg!(windows) {
+            "radiate-ffmpeg.exe"
+        } else {
+            "radiate-ffmpeg"
+        };
+        Some(exe.parent()?.join(name))
+    });
+    if let Some(p) = bundled.filter(|p| is_file(p)) {
+        return Some(p);
+    }
+    let names: &[&str] = if cfg!(windows) {
+        &["ffmpeg.exe"]
+    } else {
+        &["ffmpeg"]
+    };
+    on_path(names).or_else(|| {
+        let mut v: Vec<PathBuf> = Vec::new();
+        if cfg!(windows) {
+            if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+                v.push(PathBuf::from(local).join(r"Microsoft\WinGet\Links\ffmpeg.exe"));
+            }
+            if let Some(home) = std::env::var_os("USERPROFILE") {
+                v.push(PathBuf::from(home).join(r"scoop\shims\ffmpeg.exe"));
+            }
+            v.push(r"C:\ProgramData\chocolatey\bin\ffmpeg.exe".into());
+        } else {
+            for d in [
+                "/opt/homebrew/bin",
+                "/usr/local/bin",
+                "/opt/local/bin",
+                "/usr/bin",
+            ] {
+                v.push(PathBuf::from(d).join("ffmpeg"));
             }
         }
-    }
-    common_locations().into_iter().find(|p| is_file(p))
+        v.into_iter().find(|p| is_file(p))
+    })
 }

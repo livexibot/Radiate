@@ -218,8 +218,10 @@ export function Player({ route }: { route: PlayerRoute }) {
     if (isChannel) return;
     const id = target.id;
     const save = () => {
-      const v = control.current?.video;
-      if (v && shouldSaveProgress(v.currentTime, v.duration)) void api.progressSet(id, v.currentTime, v.duration).catch(() => undefined);
+      const c = control.current;
+      if (!c) return;
+      const [at, dur] = [c.position(), c.duration()];
+      if (shouldSaveProgress(at, dur)) void api.progressSet(id, at, dur).catch(() => undefined);
     };
     saveProgress.current = save;
     const iv = window.setInterval(save, 10_000);
@@ -240,9 +242,9 @@ export function Player({ route }: { route: PlayerRoute }) {
   }, [nextUp, navigate]);
 
   const seekTo = useCallback((secs: number) => {
-    const v = control.current?.video;
-    if (!v) return;
-    v.currentTime = secs;
+    const c = control.current;
+    if (!c) return;
+    c.seek(secs);
     setTime((t) => ({ ...t, cur: secs }));
   }, []);
 
@@ -390,8 +392,8 @@ export function Player({ route }: { route: PlayerRoute }) {
             if (w) control.current?.seekLive(w.behind - action.delta);
             return;
           }
-          const v = control.current?.video;
-          if (v) seekTo(seekTarget(v.currentTime, action.delta, v.duration));
+          const c = control.current;
+          if (c) seekTo(seekTarget(c.position(), action.delta, c.duration()));
           return;
         }
         case "toggle-pause": {

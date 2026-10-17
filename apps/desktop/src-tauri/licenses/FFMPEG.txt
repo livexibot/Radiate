@@ -1,0 +1,17 @@
+Radiate installs a copy of FFmpeg next to itself, as a separate program
+(radiate-ffmpeg). Radiate runs it to convert streams its built-in player can't
+decode. Radiate itself is MIT licensed; FFmpeg is not part of it.
+
+FFmpeg 7.0.2, built with libx264 and other libraries, is licensed under the
+GNU General Public License version 3 (see GPL-3.0.txt next to this file).
+
+Source code: https://ffmpeg.org/releases/ffmpeg-7.0.2.tar.xz
+Builds, as published by the ffmpeg-static project (release b6.1.1,
+https://github.com/eugeneware/ffmpeg-static/releases/tag/b6.1.1):
+  Windows  gyan.dev        https://www.gyan.dev/ffmpeg/builds/
+  macOS    evermeet.cx (Intel), osxexperts.net (Apple silicon)
+  Linux    johnvansickle.com https://johnvansickle.com/ffmpeg/
+Each site publishes how its build was configured and the sources of the
+libraries it includes.
+
+FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.

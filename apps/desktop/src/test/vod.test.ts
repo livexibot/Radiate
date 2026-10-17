@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Episode, SeriesInfo } from "../api";
-import { followStep, HLS_BEHIND, hlsConfig, latencyOf, liveFollow, mpegtsConfig, REWIND_SECS, startBufferSecs } from "../player/latency";
+import { followStep, HLS_BEHIND, hlsConfig, holdConfig, latencyOf, liveFollow, mpegtsConfig, rebufferSecs, REWIND_SECS, startBufferSecs } from "../player/latency";
 import { gapJump, LIVE_SLACK, liveWindow, playableSpan, rewindTarget } from "../player/timeshift";
 import {
   episodeLabel,
@@ -159,15 +159,24 @@ describe("latency", () => {
     expect(latencyOf("low")).toBe("low");
   });
   it("stays closer to the edge when low and further when stable", () => {
-    const sync = (l: "low" | "normal" | "stable") => hlsConfig(l, true).liveSyncDurationCount as number;
-    expect(sync("low")).toBeLessThan(sync("normal"));
-    expect(sync("normal")).toBeLessThan(sync("stable"));
+    expect(hlsConfig("low", true).liveSyncDurationCount).toBe(2);
+    expect(hlsConfig("normal", true).liveSyncDuration as number).toBeGreaterThanOrEqual(10);
+    expect(hlsConfig("stable", true).liveSyncDuration as number).toBeGreaterThan(hlsConfig("normal", true).liveSyncDuration as number);
     expect(hlsConfig("low", true).lowLatencyMode).toBe(true);
     for (const l of ["low", "normal", "stable"] as const) {
       const c = hlsConfig(l, true);
-      expect(c.liveMaxLatencyDurationCount as number).toBeGreaterThan(c.liveSyncDurationCount as number);
+      // hls.js throws on a mix of seconds and segment counts.
+      const counts = c.liveSyncDurationCount !== undefined || c.liveMaxLatencyDurationCount !== undefined;
+      const secs = c.liveSyncDuration !== undefined || c.liveMaxLatencyDuration !== undefined;
+      expect(counts && secs).toBe(false);
+      if (secs) expect(c.liveMaxLatencyDuration as number).toBeGreaterThan(c.liveSyncDuration as number);
+      else expect(c.liveMaxLatencyDurationCount as number).toBeGreaterThan(c.liveSyncDurationCount as number);
+      const held = holdConfig(c, "hls");
+      expect(held.liveSyncDuration !== undefined && held.liveMaxLatencyDurationCount !== undefined).toBe(false);
       const f = liveFollow(l);
       expect(f.targetLatency).toBeLessThan(f.maxLatency);
+      // Following live never eats into the buffer a channel starts with.
+      expect(f.targetLatency).toBeGreaterThanOrEqual(startBufferSecs(l));
     }
     const target = (l: "low" | "normal" | "stable") => liveFollow(l).targetLatency;
     expect(target("low")).toBeLessThan(target("normal"));
@@ -186,11 +195,12 @@ describe("latency", () => {
   });
   it("keeps up with the edge by playing faster, then normal", () => {
     const f = liveFollow("normal");
-    expect(followStep(6, 1, f)).toEqual({ rate: f.rate, jump: false });
+    expect(followStep(f.maxLatency + 1, 1, f)).toEqual({ rate: f.rate, jump: false });
     // Between target and max: keep the speed it has.
-    expect(followStep(3, f.rate, f)).toEqual({ rate: f.rate, jump: false });
-    expect(followStep(3, 1, f)).toEqual({ rate: 1, jump: false });
-    expect(followStep(2, f.rate, f)).toEqual({ rate: 1, jump: false });
+    const between = (f.maxLatency + f.targetLatency) / 2;
+    expect(followStep(between, f.rate, f)).toEqual({ rate: f.rate, jump: false });
+    expect(followStep(between, 1, f)).toEqual({ rate: 1, jump: false });
+    expect(followStep(f.targetLatency - 1, f.rate, f)).toEqual({ rate: 1, jump: false });
     expect(followStep(20, 1, liveFollow("low"))).toEqual({ rate: 1, jump: true });
   });
   it("keeps minutes of live TV to rewind", () => {
@@ -204,6 +214,7 @@ describe("latency", () => {
     // Behind live, hls.js loads up to the edge and never jumps or speeds up.
     expect(HLS_BEHIND.maxBufferLength).toBeGreaterThan(REWIND_SECS);
     expect(HLS_BEHIND.liveMaxLatencyDurationCount).toBe(Infinity);
+    expect(HLS_BEHIND.liveMaxLatencyDuration).toBe(Infinity);
     expect(HLS_BEHIND.maxLiveSyncPlaybackRate).toBe(1);
   });
 });
@@ -242,9 +253,12 @@ describe("live rewind", () => {
     expect(rewindTarget(-5, w, 97)).toBeNull();
     expect(LIVE_SLACK).toBeGreaterThan(1);
   });
-  it("only stable waits for a buffer before a live MPEG-TS starts", () => {
+  it("starts live TV with at least 10 seconds buffered, unless low latency", () => {
     expect(startBufferSecs("low")).toBe(0);
-    expect(startBufferSecs("normal")).toBe(0);
-    expect(startBufferSecs("stable")).toBeGreaterThan(0);
+    expect(startBufferSecs("normal")).toBeGreaterThanOrEqual(10);
+    expect(startBufferSecs("stable")).toBeGreaterThan(startBufferSecs("normal"));
+    expect(rebufferSecs("low")).toBe(0);
+    expect(rebufferSecs("normal")).toBeGreaterThan(0);
+    expect(rebufferSecs("normal")).toBeLessThanOrEqual(startBufferSecs("normal"));
   });
 });

@@ -61,6 +61,8 @@ LIVE = [
     (104, "Harbor News", "2", "live_b.ts", "harbor.example"),
     # run together, with a country tag and superscript letters, as many providers write them
     (105, "UK| ARENASPORTS 3 ᴴᴰ", "1", "live_b.ts", "arena3.example"),
+    # MPEG-2 pictures and MP2 sound, which only play converted
+    (106, "Retro Sports SD", "1", "live_mpeg2.ts", "retro.example"),
 ]
 LIVE_CATS = [("1", "Sports"), ("2", "News")]
 VOD_CATS = [("10", "Action"), ("11", "Drama")]
@@ -68,7 +70,7 @@ MOVIES = [
     # id, name, category, ext, file
     (201, "Faststart Movie", "10", "mp4", "movie_faststart.mp4"),
     (202, "Late Index Movie", "10", "mp4", "movie_lateindex.mp4"),
-    (203, "Matroska Movie", "11", "mkv", "movie.mkv"),
+    (203, "Matroska Movie", "11", "mkv", "movie_ac3.mkv"),
     (204, "Streaming Movie", "11", "m3u8", "hlsvod/index.m3u8"),
 ]
 SERIES_CATS = [("20", "Drama Series")]
