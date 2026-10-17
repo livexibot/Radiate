@@ -35,6 +35,9 @@ const MAX_SEGMENT: usize = 64 * 1024 * 1024;
 const MAX_ALLOWED: usize = 8192;
 /// After this much data since the last reconnect, the retry budget resets.
 const RETRY_RESET_BYTES: u64 = 512 * 1024;
+/// A live MPEG-TS stream that sends nothing for this long is reconnected: sooner than the
+/// player's 10 s buffer runs out, so the picture rides out the reconnect.
+const LIVE_QUIET: Duration = Duration::from_secs(8);
 
 // ---------------------------------------------------------------------------
 // Sessions
@@ -768,6 +771,11 @@ impl Pump {
         let mut attempts: u32 = 0;
         let mut resp = Some(up.resp);
         let mut pending = Some(up.first);
+        let quiet = if self.reconnect {
+            cfg.read_timeout.min(LIVE_QUIET)
+        } else {
+            cfg.read_timeout
+        };
 
         loop {
             if let Some(b) = pending.take() {
@@ -787,7 +795,7 @@ impl Pump {
             let next = tokio::select! {
                 _ = self.token.cancelled() => { s.waiting(false); return }
                 _ = tx.closed() => { s.waiting(false); return }
-                c = tokio::time::timeout(cfg.read_timeout, r.chunk()) => c,
+                c = tokio::time::timeout(quiet, r.chunk()) => c,
             };
             s.waiting(false);
             let mut last_status = None;

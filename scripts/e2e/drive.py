@@ -1136,14 +1136,16 @@ class Run:
         self.s.wait("held after zap", lambda: "Holding the match" in self.s.text(), timeout=30)
         self.s.wait("plays after zap", lambda: (x := self.s.video()) and not x["paused"] and x["t"] > 0.5 and "Holding the match" not in self.s.text() and x, timeout=30)
         time.sleep(2)
-        r.ok(ahead() >= 4, f"after a zap the new channel is held back too ({ahead()} s ahead)")
+        held_ahead = ahead()
+        r.ok(held_ahead >= 4, f"after a zap the new channel is held back too ({held_ahead} s ahead)")
 
         # R turns it off and the match goes back to live
         self.s.key("r")
         self.s.wait("box gone", lambda: box() is None, timeout=5)
         self.wait_playing(min_t=0.5, timeout=30)
         time.sleep(3)
-        r.ok(ahead() < 4, f"R hides the reactor and the match is live again ({ahead()} s ahead)")
+        # the 5 s hold is dropped (live itself keeps up to 12 s buffered)
+        r.ok(ahead() <= held_ahead - 3, f"R hides the reactor and the match is live again ({ahead()} s ahead, {held_ahead} while held)")
 
         # adding by link: a handle needs YouTube; a video link works without it
         self.s.click("//button[contains(@class,'cb')][contains(.,'Reactor')]")

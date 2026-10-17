@@ -48,6 +48,7 @@ from urllib.parse import parse_qs, urlsplit
 ARGS: argparse.Namespace
 LOCK = threading.Lock()
 MEDIA_CONNS: dict[int, dict] = {}  # id(handler) -> info, for connections that asked for media
+FROZEN = {"live": False}  # with --freeze-live-after: once frozen, later live connections get nothing
 CLOSED_AT: list[float] = []  # when media connections closed, for --report-lag
 PHANTOM = {"n": 0}
 STATS = {"peak": 0, "refused": [], "requests": [], "api_calls": 0}
@@ -424,13 +425,15 @@ class Handler(BaseHTTPRequestHandler):
                 chunk = proc.stdout.read1(65536) if proc.stdout else b""
                 if not chunk:
                     break
-                self.wfile.write(chunk)
-                sent += len(chunk)
+                if not (ARGS.freeze_live_after and FROZEN["live"]):
+                    self.wfile.write(chunk)
+                    sent += len(chunk)
                 if ARGS.drop_live_after and sent > ARGS.drop_live_after:
                     log("dropping live connection on purpose")
                     break
-                if ARGS.freeze_live_after and sent > ARGS.freeze_live_after:
+                if ARGS.freeze_live_after and (sent > ARGS.freeze_live_after or FROZEN["live"]):
                     log("live connection frozen on purpose (open, sending nothing)")
+                    FROZEN["live"] = True
                     proc.kill()
                     while True:
                         with LOCK:
@@ -544,7 +547,7 @@ def main() -> None:
     p.add_argument("--grace", type=float, default=1.5, help="seconds to wait for a closing connection before refusing")
     p.add_argument("--report-lag", type=float, default=0, help="seconds active_cons keeps counting a closed connection")
     p.add_argument("--drop-live-after", type=int, default=0, help="close each live TS connection after this many bytes (reconnect tests)")
-    p.add_argument("--freeze-live-after", type=int, default=0, help="stop sending on each live TS connection after this many bytes, keeping it open (stall tests)")
+    p.add_argument("--freeze-live-after", type=int, default=0, help="stop sending live TS after this many bytes, keeping the connection open; later connections get nothing (stall tests)")
     ARGS = p.parse_args()
     ARGS.vod_rate = ARGS.vod_rate or None
     if not os.path.isfile(os.path.join(ARGS.media, "live_a.ts")):

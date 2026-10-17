@@ -268,8 +268,9 @@ Rules:
   count, our own sessions still never go over `limit`, and the provider
   decides whether to serve the stream. Multiview tiles don't offer it.
 - A session closes on `close`, or after 20 s with no reads from the player.
-- Reconnect on upstream drop: up to 3 quiet retries on the same session
-  (the old connection is closed first), then `Failed`.
+- Reconnect on upstream drop, or when live MPEG-TS sends nothing for 8 s
+  (less than the player's 10 s buffer): up to 3 quiet retries on the same
+  session (the old connection is closed first), then `Failed`.
 - Plain-language failures: 401/403 "The provider refused this stream.
   Your account may have expired or reached its connection limit.", 404
   "This channel is offline at the provider.", 5xx "The provider's server

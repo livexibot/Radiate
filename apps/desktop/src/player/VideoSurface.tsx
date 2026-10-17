@@ -389,8 +389,9 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
     const onWaiting = () => {
       waiting = true;
       // Live TV that ran out of stream builds a few seconds back up before playing on, instead
-      // of stuttering on the little that arrives.
-      if (!isLive || gathering || video.paused || video.seeking || holdBack?.d.holding) return;
+      // of stuttering on the little that arrives. Not before the first picture: a channel plays
+      // as soon as it can.
+      if (!isLive || !hasStarted || gathering || video.paused || video.seeking || holdBack?.d.holding) return;
       const need = bufferRef.current ? rebufferSecs(latencyRef.current) : 0;
       const span = playableSpan(video.buffered, video.currentTime);
       if (need <= 0 || (span && span.end - video.currentTime > 1)) return;
