@@ -3,7 +3,7 @@ import type Hls from "hls.js";
 import type { LatencyPref, PlayStarted } from "../api";
 import { MatchDelay } from "../reactor/delay";
 import { convertInfoUrl, convertSrc, firstStage, type ConvertStage } from "./convert";
-import { followStep, HLS_BEHIND, hlsConfig, holdConfig, liveFollow, mpegtsConfig, rebufferSecs, startBufferSecs } from "./latency";
+import { followStep, HLS_BEHIND, hlsConfig, hlsLive, hlsSegmentSecs, holdConfig, liveFollow, mpegtsConfig, rebufferSecs } from "./latency";
 import { gapJump, LIVE_SLACK, liveWindow, playableSpan, rewindTarget, type LiveWindow } from "./timeshift";
 import { resumePosition, STALL_SECS, stallStep } from "./vodLogic";
 
@@ -169,16 +169,30 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
       }
       fatal(UNSUPPORTED);
     };
+    // Sound but no picture after a few seconds of stream: the picture is in a format the player
+    // skips without an error (MPEG-2 or MPEG-4 Part 2 in MPEG-TS), so convert it. A radio stream
+    // pays one restart for this.
+    let pictureChecked = false;
+    const soundOnly = () => {
+      if (pictureChecked || !convertBase || stage >= 2 || video.readyState < 1) return false;
+      let got = 0;
+      for (let i = 0; i < video.buffered.length; i++) got += video.buffered.end(i) - video.buffered.start(i);
+      if (got < 3) return false;
+      pictureChecked = true;
+      if (video.videoWidth > 0) return false;
+      unsupported(true);
+      return true;
+    };
     const holdBack = isLive ? { d: new MatchDelay(video, (left) => !disposed && cb.current.onHold?.(left)), started: false } : null;
     matchDelay.current = holdBack;
     const hold = isLive && delayRef.current > 0;
 
     // Live TV keeps the last few minutes. Watching from behind (rewound or paused) stops all
     // catching up until "Go live"; MPEG-TS is kept near the edge here, HLS by hls.js itself.
-    const pace = liveFollow(latencyRef.current);
+    const pace = liveFollow(latencyRef.current, bufferRef.current);
     const follow = isLive && kind === "mpegts" && !hold ? pace : null;
-    // Live TV starts with a buffer ahead and builds some back after running out (see latency.ts).
-    // While it gathers, the picture is paused without counting as paused.
+    // Live TV that ran out of stream builds a few seconds back up before playing on (see
+    // latency.ts). While it gathers, the picture is paused without counting as paused.
     let gathering = false;
     let gatherTimer: number | null = null;
     // Seconds the stream has sent nothing while gathering: that counts as a stuck picture.
@@ -204,8 +218,8 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
         const ahead = span ? span.end - Math.max(video.currentTime, span.start) : 0;
         gatherStill = span && span.end === lastEnd ? gatherStill + 0.2 : 0;
         lastEnd = span?.end ?? -1;
-        // HLS loads everything up to the edge at once: when nothing more comes, that's all there is.
-        const allThere = !!hls && ahead > 0 && gatherStill >= 2;
+        // HLS adds a segment at a time: when none has come for longer than one lasts, that's all there is.
+        const allThere = !!hls && ahead > 0 && gatherStill >= hlsSegmentSecs(hlsSegment) + 2;
         if (ahead >= need || allThere || performance.now() - since > (need + 15) * 1000) {
           stopGather();
           tryPlay();
@@ -215,6 +229,8 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
     let behindLive = false;
     let liveTicks = 0;
     let hlsSaved: Record<string, unknown> | null = null;
+    // The live playlist's segment length, once loaded.
+    let hlsSegment: number | null = null;
     // hls.js's live position stands still while a playlist reload is late and then jumps on.
     // Live moves one second per second, so keep the furthest it has been in the last 20 s.
     const edgeSeen: { at: number; off: number }[] = [];
@@ -224,9 +240,12 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
       while (edgeSeen.length > 1 && now - edgeSeen[0]!.at > 20) edgeSeen.shift();
       return now + Math.max(...edgeSeen.map((e) => e.off));
     };
+    // How far behind the newest data live MPEG-TS plays when following live: the target, or less
+    // while the buffer is still building up after a start.
+    let tsAhead = pace.targetLatency;
     /** Where the picture would be following live, on the video's timeline. */
     const liveAt = (span: { start: number; end: number }) => {
-      const at = hls ? Math.min(steadyLive(hls.liveSyncPosition ?? span.end - 6), span.end) : span.end - pace.targetLatency;
+      const at = hls ? Math.min(steadyLive(hls.liveSyncPosition ?? span.end - 6), span.end) : span.end - tsAhead;
       return Math.max(span.start, at - delayRef.current);
     };
     const measure = (): LiveWindow | null => {
@@ -262,6 +281,8 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
       if (!isLive) return;
       stopGather();
       backToLive();
+      // Back with the whole buffer ahead where the stream has it.
+      tsAhead = pace.targetLatency;
       const span = playableSpan(video.buffered, Number.POSITIVE_INFINITY);
       if (span) {
         const at = liveAt(span);
@@ -420,15 +441,13 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
         unsupported();
         return null;
       }
-      const cfg = mpegtsConfig(latencyRef.current, isLive, rewindRef.current);
+      const cfg = mpegtsConfig(isLive, rewindRef.current);
       const p = mpegts.createPlayer({ type: "mpegts", isLive, url }, hold ? holdConfig(cfg, "mpegts") : cfg) as unknown as MpegtsPlayer;
       ts = p;
       p.on(mpegts.Events.MEDIA_INFO, (...args: unknown[]) => {
-        const info = args[0] as { videoCodec?: string; fps?: number; hasVideo?: boolean } | undefined;
+        const info = args[0] as { videoCodec?: string; fps?: number } | undefined;
         codec = info?.videoCodec ?? null;
         fps = info?.fps ? Math.round(info.fps) : null;
-        // No picture mpegts.js can read (MPEG-2, MPEG-4 Part 2): sound alone isn't the channel.
-        if (info?.hasVideo === false && ts === p) unsupported(true);
       });
       p.on(mpegts.Events.ERROR, (...args: unknown[]) => {
         if (ts !== p) return;
@@ -516,8 +535,26 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
             if (!behindLive) sync.call(sc, d);
           };
         }
+        // Live starts the buffer's length behind the edge, which depends on the segment length:
+        // set that as each playlist arrives, before hls.js picks where to start from it.
+        const fitSegments = (d: { live: boolean; targetduration: number }) => {
+          if (!d.live || d.targetduration === hlsSegment) return;
+          hlsSegment = d.targetduration;
+          const tuned = hold || !bufferRef.current ? null : hlsLive(latencyRef.current, hlsSegment);
+          if (!tuned) return;
+          const { liveSyncDuration, ...rest } = tuned;
+          const c = h.config as unknown as Record<string, unknown>;
+          c.liveSyncDuration = liveSyncDuration;
+          // Behind live these come back on Go live.
+          Object.assign(hlsSaved ?? c, rest);
+        };
+        const trigger = h.trigger.bind(h);
+        h.trigger = ((event: string, data: unknown) => {
+          if (event === HlsCtor.Events.LEVEL_LOADED) fitSegments((data as { details: { live: boolean; targetduration: number } }).details);
+          return trigger(event as never, data as never);
+        }) as typeof h.trigger;
         h.on(HlsCtor.Events.MANIFEST_PARSED, () => {
-          gather(isLive && bufferRef.current ? startBufferSecs(latencyRef.current) : 0);
+          tryPlay();
           emitTracks();
         });
         h.on(HlsCtor.Events.LEVEL_SWITCHED, (_e, data) => {
@@ -555,7 +592,7 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
       if (kind === "mpegts") {
         const p = await openTs(stage !== 0 && convertBase ? convertSrc(convertBase, stage) : stream.url);
         if (!p) return;
-        gather(isLive && bufferRef.current ? startBufferSecs(latencyRef.current) : 0);
+        tryPlay();
         if (vodConvert) void readLength();
         return;
       }
@@ -584,13 +621,14 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
             if (!follow || behindLive) return;
             const span = playableSpan(video.buffered, video.currentTime);
             if (!span) return;
+            tsAhead = Math.min(follow.targetLatency, span.end - video.currentTime);
             const step = followStep(span.end - video.currentTime, video.playbackRate, follow);
             if (step.jump) video.currentTime = span.end - follow.keep;
             else if (video.playbackRate !== step.rate) video.playbackRate = step.rate;
           }, 250)
         : null;
     const statsTimer = window.setInterval(() => {
-      if (disposed) return;
+      if (disposed || soundOnly()) return;
       if (isLive) {
         // Back at live by itself (a short pause, or the player jumped there): follow it again.
         // Only when the picture is really at the newest buffered part, two seconds running, since

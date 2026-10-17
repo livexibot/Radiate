@@ -75,9 +75,16 @@ page.
   address, so it is still the stream's one provider connection. The
   player tries copying the picture first and converts it to H.264 only
   when it has to. mpv stays optional ("Open in mpv"), never required.
-- Live TV starts with 10 s of picture buffered (20 s with the 20 s
-  setting, nothing with Minimal) and builds 5 s back up after a stall.
-  Previews start at once.
+- Live TV plays at once, 10 s behind live (20 s with the 20 s setting,
+  at the edge with Minimal): the owner asked for that over waiting for a
+  buffer. HLS starts that far back straight away, plus two segments so
+  the buffer stays ahead between them (`hlsLive`); live MPEG-TS has
+  nothing older to start from, so it plays what the provider sends at
+  once and builds the rest up at 0.95x (`BUILD_RATE`). Go live comes back
+  with the whole buffer ahead. After a stall the picture waits for 5 s of
+  stream before playing on. Previews play at normal speed.
+- Sound with no picture after 3 s (an MPEG-2 or MPEG-4 Part 2 picture
+  that mpegts.js skips without an error) goes to the converter too.
 - Navigation is a centred top bar: Home, Search, Favorites | Live TV,
   Guide, Settings. Movies and series are reached from Home and Search.
   Favorites is its own screen.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Episode, SeriesInfo } from "../api";
-import { followStep, HLS_BEHIND, hlsConfig, holdConfig, latencyOf, liveFollow, mpegtsConfig, rebufferSecs, REWIND_SECS, startBufferSecs } from "../player/latency";
+import { BUILD_RATE, followStep, HLS_BEHIND, hlsConfig, hlsLive, hlsSegmentSecs, holdConfig, latencyOf, liveFollow, mpegtsConfig, rebufferSecs, REWIND_SECS, startBufferSecs } from "../player/latency";
 import { gapJump, LIVE_SLACK, liveWindow, playableSpan, rewindTarget } from "../player/timeshift";
 import {
   episodeLabel,
@@ -188,8 +188,8 @@ describe("latency", () => {
     expect(liveFollow("low").jumpAbove).toBeGreaterThan(liveFollow("low").maxLatency);
     // mpegts.js never catches up by itself; Radiate does, and stops while you watch from behind.
     for (const live of [true, false]) {
-      expect(mpegtsConfig("low", live).liveSync).toBe(false);
-      expect(mpegtsConfig("low", live).liveBufferLatencyChasing).toBe(false);
+      expect(mpegtsConfig(live).liveSync).toBe(false);
+      expect(mpegtsConfig(live).liveBufferLatencyChasing).toBe(false);
     }
     expect(hlsConfig("low", false).lowLatencyMode).toBe(false);
   });
@@ -203,14 +203,28 @@ describe("latency", () => {
     expect(followStep(f.targetLatency - 1, f.rate, f)).toEqual({ rate: 1, jump: false });
     expect(followStep(20, 1, liveFollow("low"))).toEqual({ rate: 1, jump: true });
   });
+  it("plays live MPEG-TS at once and builds the buffer up slightly slower", () => {
+    const f = liveFollow("normal");
+    expect(BUILD_RATE).toBeGreaterThanOrEqual(0.95);
+    expect(BUILD_RATE).toBeLessThan(1);
+    // just started, with what the provider sent at once
+    expect(followStep(2, 1, f)).toEqual({ rate: BUILD_RATE, jump: false });
+    // building on past the start buffer, up to the target, then normal speed
+    expect(followStep(startBufferSecs("normal") + 1, BUILD_RATE, f)).toEqual({ rate: BUILD_RATE, jump: false });
+    expect(followStep(f.targetLatency, BUILD_RATE, f)).toEqual({ rate: 1, jump: false });
+    expect(followStep(f.targetLatency + 1, 1, f)).toEqual({ rate: 1, jump: false });
+    // low latency and previews never slow down
+    expect(followStep(0.5, 1, liveFollow("low"))).toEqual({ rate: 1, jump: false });
+    expect(followStep(2, 1, liveFollow("normal", false))).toEqual({ rate: 1, jump: false });
+  });
   it("keeps minutes of live TV to rewind", () => {
     expect(hlsConfig("normal", true, true).backBufferLength).toBe(REWIND_SECS);
     expect(hlsConfig("normal", false, true).backBufferLength).toBe(30);
-    expect(mpegtsConfig("normal", true, true).autoCleanupMinBackwardDuration).toBe(REWIND_SECS);
-    expect(mpegtsConfig("normal", true, true).autoCleanupMaxBackwardDuration as number).toBeGreaterThan(REWIND_SECS);
+    expect(mpegtsConfig(true, true).autoCleanupMinBackwardDuration).toBe(REWIND_SECS);
+    expect(mpegtsConfig(true, true).autoCleanupMaxBackwardDuration as number).toBeGreaterThan(REWIND_SECS);
     // Multiview tiles keep little.
     expect(hlsConfig("normal", true).backBufferLength).toBe(30);
-    expect(mpegtsConfig("normal", true).autoCleanupMinBackwardDuration).toBe(30);
+    expect(mpegtsConfig(true).autoCleanupMinBackwardDuration).toBe(30);
     // Behind live, hls.js loads up to the edge and never jumps or speeds up.
     expect(HLS_BEHIND.maxBufferLength).toBeGreaterThan(REWIND_SECS);
     expect(HLS_BEHIND.liveMaxLatencyDurationCount).toBe(Infinity);
@@ -253,12 +267,29 @@ describe("live rewind", () => {
     expect(rewindTarget(-5, w, 97)).toBeNull();
     expect(LIVE_SLACK).toBeGreaterThan(1);
   });
-  it("starts live TV with at least 10 seconds buffered, unless low latency", () => {
+  it("keeps at least 10 seconds of live TV buffered, unless low latency", () => {
     expect(startBufferSecs("low")).toBe(0);
     expect(startBufferSecs("normal")).toBeGreaterThanOrEqual(10);
     expect(startBufferSecs("stable")).toBeGreaterThan(startBufferSecs("normal"));
     expect(rebufferSecs("low")).toBe(0);
     expect(rebufferSecs("normal")).toBeGreaterThan(0);
     expect(rebufferSecs("normal")).toBeLessThanOrEqual(startBufferSecs("normal"));
+  });
+  it("starts live HLS far enough back to keep the buffer ahead between segments, whatever their length", () => {
+    expect(hlsLive("low", 6)).toBeNull();
+    for (const l of ["normal", "stable"] as const) {
+      for (const seg of [1, 2, 4, 6, 10]) {
+        const t = hlsLive(l, seg)!;
+        // just before the next segment arrives, a segment less is buffered
+        expect(t.liveSyncDuration - 2 * seg).toBeGreaterThanOrEqual(startBufferSecs(l));
+        expect(t.liveMaxLatencyDuration).toBeGreaterThan(t.liveSyncDuration);
+        expect(t.maxBufferLength).toBeGreaterThanOrEqual(t.liveSyncDuration + seg);
+        // never closer to the edge than before
+        expect(t.liveSyncDuration).toBeGreaterThanOrEqual(hlsConfig(l, true).liveSyncDuration as number);
+      }
+    }
+    expect(hlsSegmentSecs(null)).toBe(2);
+    expect(hlsSegmentSecs(30)).toBe(10);
+    expect(hlsLive("normal", 2)!.liveSyncDuration).toBe(14);
   });
 });

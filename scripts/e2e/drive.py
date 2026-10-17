@@ -141,7 +141,7 @@ class Session:
             "const v = document.querySelector('video'); if (!v) return null;"
             "const b = []; for (let i = 0; i < v.buffered.length; i++) b.push([+v.buffered.start(i).toFixed(2), +v.buffered.end(i).toFixed(2)]);"
             "return {t: +v.currentTime.toFixed(2), d: Number.isFinite(v.duration) ? +v.duration.toFixed(2) : String(v.duration),"
-            " paused: v.paused, ended: v.ended, seeking: v.seeking, rs: v.readyState, w: v.videoWidth, err: v.error && v.error.code,"
+            " paused: v.paused, ended: v.ended, seeking: v.seeking, rs: v.readyState, w: v.videoWidth, err: v.error && v.error.code, rate: v.playbackRate,"
             " buffered: b, src: v.currentSrc.slice(0, 80)};"
         )
 
@@ -725,6 +725,7 @@ class Run:
         st0 = provider_stats(self.args.port)
         opened_before = sum(1 for q in st0["requests"] if q["path"].startswith("/live/"))
         # preview -> full player with Watch: the same session carries on
+        t0 = time.time()
         self.s.click(xp_text("button", "Watch"))
         v = self.s.wait("live playing", lambda: (x := self.s.video()) and x["rs"] >= 2 and x["t"] > 2 and x and self.s.exists("//*[contains(@class,'player')]") and x, timeout=40)
         st1 = provider_stats(self.args.port)
@@ -735,16 +736,22 @@ class Run:
         r.ok(ours == 1 and prov == 1 and st1["peak"] <= st0["peak"] + 0 and not st1["refused"],
              f"Watch moves the preview into the full player in the same session (app {ours}, provider {prov}, upstream re-requested {opened_after - opened_before}x, peak {st1['peak']})")
         r.ok(True, f"live MPEG-TS plays (currentTime {v['t']})")
+        waited = round(time.time() - t0, 1)
         ahead0 = round(v["buffered"][-1][1] - v["t"], 2) if v.get("buffered") else 0
-        r.ok(ahead0 >= 8, f"it started with {ahead0} s buffered ahead (asked for 10)")
+        r.ok(waited <= 7, f"the full player plays at once ({waited} s to 2 s of picture, {ahead0} s buffered ahead)")
+        # live MPEG-TS has nothing older to start from: short of 10 s ahead, it builds up slightly slower
+        r.ok(ahead0 >= 9.5 or abs(v["rate"] - 0.95) < 0.01, f"short of 10 s ahead it plays at {v['rate']}x")
         samples = []
+        grows = []
         for _ in range(10):
             time.sleep(1)
             x = self.s.video() or {}
             samples.append(x.get("t"))
+            grows.append(round(x["buffered"][-1][1] - x["t"], 2) if x.get("buffered") else 0)
         stats = self.s.js("const v=document.querySelector('video'); const q=v.getVideoPlaybackQuality? v.getVideoPlaybackQuality():null; return q?{dropped:q.droppedVideoFrames,total:q.totalVideoFrames}:null;")
         steps = [round(b - a, 2) for a, b in zip(samples, samples[1:]) if a is not None and b is not None]
         r.ok(all(0.6 <= s <= 1.4 for s in steps), f"live TS advances smoothly: per-second steps {steps}; frames {stats}")
+        r.ok(grows[-1] - grows[0] >= 0.25 or grows[-1] >= 9.5, f"the buffer builds up while playing: {grows[0]} -> {grows[-1]} s ahead")
         buf = self.s.video() or {}
         r.note(f"live buffer {buf.get('buffered')} at {buf.get('t')}")
         # zap through the channels with Down; never above the limit
@@ -762,15 +769,15 @@ class Run:
         r.ok("stream stopped" not in t and "connections" not in t.lower(), "no failure or limit card after zapping")
         x = self.s.video() or {}
         ahead = round(x["buffered"][-1][1] - x["t"], 2) if x.get("buffered") else 0
-        r.ok(ahead >= 8, f"after zapping: {ahead} s buffered ahead of the picture")
-        # latency "stable" holds a deeper buffer on live MPEG-TS
+        r.ok(ahead >= 9.5 or abs(x["rate"] - 0.95) < 0.01, f"after zapping: {ahead} s buffered ahead, building up at {x['rate']}x")
+        # latency "stable" builds a deeper buffer on live MPEG-TS
         self.s.invoke("prefs_set", {"patch": {"latency": "stable"}})
         self.s.key("ArrowDown")
         self.s.wait("stable playing", lambda: (x := self.s.video()) and x["rs"] >= 2 and x["t"] > 3 and x, timeout=60)
         time.sleep(3)
         x = self.s.video() or {}
         ahead = round(x["buffered"][-1][1] - x["t"], 2) if x.get("buffered") else 0
-        r.ok(ahead >= 16, f"latency stable: {ahead} s buffered ahead of the picture")
+        r.ok(ahead >= 19.5 or abs(x["rate"] - 0.95) < 0.01, f"latency stable: {ahead} s buffered ahead, building up to 20 s at {x['rate']}x")
         self.s.invoke("prefs_set", {"patch": {"latency": "normal"}})
         self.leave_player()
         time.sleep(3)
@@ -795,10 +802,17 @@ class Run:
 
         for fmt in ("ts", "hls"):
             self.s.invoke("prefs_set", {"patch": {"liveFormat": fmt, "latency": "normal"}})
+            t0 = time.time()
             self.watch(chans[1]["id"])
-            self.wait_playing(min_t=1, timeout=40)
+            v = self.wait_playing(min_t=1, timeout=40)
+            waited = round(time.time() - t0, 1)
             first = ahead()
-            r.ok(first >= 8, f"{fmt}: started with {first} s buffered ahead (asked for 10)")
+            # opening the channel's link reloads the app (2.5 s) before it plays
+            r.ok(waited <= 9, f"{fmt}: plays at once ({waited} s from opening to 1 s of picture)")
+            if fmt == "hls":
+                r.ok(first >= 8, f"hls: starts {first} s behind live straight away (asked for 10)")
+            else:
+                r.ok(first >= 9.5 or abs(v["rate"] - 0.95) < 0.01, f"ts: starts with {first} s ahead and builds up at {v['rate']}x")
             self.s.wait("live bar", lambda: behind() is not None, timeout=10)
             time.sleep(26)
             base = ahead()
@@ -846,7 +860,8 @@ class Run:
             self.s.click(xp_text("button", "Go live"))
             self.s.wait("go live", lambda: (x := behind()) is not None and x < 1.5 and x >= 0 and "Go live" not in self.s.text(), timeout=5)
             time.sleep(3)
-            r.ok(ahead() < base + 2 and (behind() or 0) < 1.5, f"{fmt}: Go live jumps to the edge ({ahead()} s ahead, {base} s when it started)")
+            # live keeps 10-12 s buffered ahead (the start buffer, then the follow target)
+            r.ok(ahead() < max(base, 12) + 2 and (behind() or 0) < 1.5, f"{fmt}: Go live jumps to the edge ({ahead()} s ahead, {base} s when it started)")
             self.leave_player()
         ours, prov, peak = self.in_use()
         st = provider_stats(self.args.port)

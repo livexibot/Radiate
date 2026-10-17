@@ -44,10 +44,11 @@ AC-3 sound plays converted by ffmpeg: its length, seeking past what has
 loaded, one connection, no ffmpeg left behind), `convert` (an MPEG-2 channel
 plays converted to H.264), `series`
 (episode, "Next episode", cancel, auto-advance, continue watching), `live`
-(live format preference, preview to full player, smooth MPEG-TS that starts
-with 10 s buffered ahead, zapping within the limit, stable latency), `rewind` (dragging the live bar back and
-forward on MPEG-TS and HLS, Left / Right, a pause that plays on from where it
-stopped, Go live), `search` (names written together or with country tags and
+(live format preference, preview to full player, smooth MPEG-TS that plays at
+once and builds its buffer up, zapping within the limit, stable latency), `rewind`
+(HLS starts 10 s behind live at once; dragging the live bar back and forward on
+MPEG-TS and HLS, Left / Right, a pause that plays on from where it stopped, Go
+live), `search` (names written together or with country tags and
 superscript letters are found; the Live box searches every group), `reactor`
 (the YouTube box: the match moves out from under it, dragging and resizing it,
 where it was left kept for next time, Open on YouTube in its own window for a
