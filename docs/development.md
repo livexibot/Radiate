@@ -118,6 +118,12 @@ page.
   buffered ahead is stepped forward 0.1 s; live HLS plays over gaps of up
   to 0.5 s between segments and keeps nudging a stuck picture
   (`maxBufferHole`, `nudgeMaxRetry`) instead of stalling.
+- A polish pass over every screen: the top bar shows the name and holds
+  the sections in a tray; cards and posters lift on hover and grow a
+  halo on keyboard focus; the guide has a wider channel column, dims past
+  programmes and draws how far the programme on now has run; Search's
+  empty screen leads to Movies and Series. New shared values are tokens
+  in `styles/base.css`.
 
 ## Layout
 
