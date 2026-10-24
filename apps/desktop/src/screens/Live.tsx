@@ -218,7 +218,13 @@ export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
                       <span className="ellipsis">{n?.now ? n.now.title : c.epgChannelId ? " " : "No guide"}</span>
                       {n?.now ? <Progress value={progressOf(n.now.start, n.now.stop, now)} className="chrow-bar" /> : null}
                     </div>
-                    <span className="chrow-next ellipsis">{n?.next ? `${clock(n.next.start)} ${n.next.title}` : ""}</span>
+                    <span className="chrow-next ellipsis">
+                      {n?.next ? (
+                        <>
+                          <b className="num">{clock(n.next.start)}</b> {n.next.title}
+                        </>
+                      ) : null}
+                    </span>
                   </div>
                 );
               }}

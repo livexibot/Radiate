@@ -1,4 +1,4 @@
-import type { MouseEvent } from "react";
+import { useState, type MouseEvent } from "react";
 import type { Channel, Programme, VodItem } from "../api";
 import { tone } from "../lib/monogram";
 import { startsIn } from "../lib/home";
@@ -91,11 +91,13 @@ export function VodCard({ item, onOpen, sub }: { item: VodItem; onOpen: () => vo
 }
 
 export function Poster({ item, onOpen }: { item: VodItem; onOpen: () => void }) {
+  const [broken, setBroken] = useState(false);
+  const art = !!item.poster && !broken;
   return (
     <button type="button" className="poster" onClick={onOpen} aria-label={item.name}>
       <span className={`poster-art ${tone(item.name)}`}>
-        {item.poster ? <img src={item.poster} alt="" loading="lazy" /> : null}
-        <span className="poster-name">{item.name}</span>
+        {/* artwork carries its own title; the name is drawn only on the plain tile */}
+        {art ? <img src={item.poster ?? undefined} alt="" loading="lazy" onError={() => setBroken(true)} /> : <span className="poster-name">{item.name}</span>}
         {item.rating ? <span className="poster-rating">★ {item.rating.toFixed(1)}</span> : null}
         {item.progress ? <Progress value={item.progress} className="poster-bar" /> : null}
       </span>

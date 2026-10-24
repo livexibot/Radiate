@@ -5,10 +5,11 @@ import { ContextMenu, type MenuState } from "../components/ContextMenu";
 import { Empty } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { Logo } from "../components/Logo";
+import { Progress } from "../components/Progress";
 import { Skeleton } from "../components/Skeleton";
 import { chunksFor, floorTo, layoutRow, mergeProgrammes, programmeAt, revealX, rulerTicks, timeAt, totalWidth, xAt, type GuideScale } from "../lib/guideLayout";
 import { shortSportsName, sportsFirst } from "../lib/sports";
-import { clock, dayLabel, DAY, HOUR, MINUTE, timeRange } from "../lib/time";
+import { clock, dayLabel, DAY, HOUR, MINUTE, progressOf, timeRange } from "../lib/time";
 import { clampIndex, computeWindow } from "../lib/virtual";
 import { StreamView } from "../player/StreamView";
 import { useApp } from "../state/app";
@@ -63,7 +64,7 @@ export function Guide({ initialChip }: { initialChip?: string }) {
   const rem = useRem();
   const ROW = Math.round(rem * 4.25);
   const RULER = Math.round(rem * 2.6);
-  const CHW = Math.round(rem * 17.5);
+  const CHW = Math.round(rem * 20);
   const [anchor] = useState(() => Date.now());
   const scale = useMemo<GuideScale>(() => ({ origin: floorTo(anchor - DAY, 30), end: floorTo(anchor + 7 * DAY, 30), pxPerMinute: rem * 0.5 }), [anchor, rem]);
 
@@ -361,7 +362,7 @@ export function Guide({ initialChip }: { initialChip?: string }) {
             <div
               key={b.programme.start}
               className={cls.join(" ")}
-              style={{ left: CHW + b.left, width: b.width }}
+              style={b.isNow ? ({ left: CHW + b.left, width: b.width, "--elapsed": `${Math.max(0, xNow - b.left)}px` } as React.CSSProperties) : { left: CHW + b.left, width: b.width }}
               onClick={() => select(i, b.programme)}
               onDoubleClick={() => (b.isNow ? play(c) : undefined)}
               title={`${b.programme.title} · ${timeRange(b.programme.start, b.programme.stop)}`}
@@ -396,6 +397,7 @@ export function Guide({ initialChip }: { initialChip?: string }) {
                 {selChannel.name}
                 {info ? ` · ${timeRange(info.start, info.stop)}` : ""}
               </p>
+              {info && isLive(info) ? <Progress value={progressOf(info.start, info.stop, now)} className="guide-info-bar" /> : null}
               {info?.description ? <p className="desc">{info.description}</p> : null}
               <div className="tags">
                 {info?.category ? <span className="pill">{info.category}</span> : null}
@@ -449,7 +451,8 @@ export function Guide({ initialChip }: { initialChip?: string }) {
                 </button>
               </div>
               {ticks.map((t) => (
-                <span key={t.t} className="tick num" style={{ left: CHW + t.x }}>
+                // the tick under the "now" label steps aside
+                <span key={t.t} className={t.x > xNow - rem * 4.4 && t.x < xNow + rem * 1.8 ? "tick num near" : "tick num"} style={{ left: CHW + t.x }}>
                   {clock(t.t)}
                 </span>
               ))}

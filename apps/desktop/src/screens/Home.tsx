@@ -98,7 +98,7 @@ export function Home() {
       ) : null}
 
       {!view || view.sports.length > 0 ? (
-        <Row title="Live sports" size="lg" more={{ label: "Guide", onClick: () => navigate({ name: "guide", chip: "sports" }) }}>
+        <Row title="Live sports" size="lg" live more={{ label: "Guide", onClick: () => navigate({ name: "guide", chip: "sports" }) }}>
           {!view ? <CardSkeletons /> : view.sports.map((it) => <ChannelCard key={it.channel.id} channel={it.channel} now={it.now} at={now} onOpen={() => play(it.channel)} onMenu={openMenu(it.channel)} live />)}
         </Row>
       ) : null}
@@ -137,11 +137,11 @@ export function Home() {
   );
 }
 
-function Row({ title, children, more, size }: { title: string; children: React.ReactNode; more?: { label: string; onClick: () => void }; size?: "lg" }) {
+function Row({ title, children, more, size, live }: { title: string; children: React.ReactNode; more?: { label: string; onClick: () => void }; size?: "lg"; live?: boolean }) {
   return (
     <section className="row">
       <div className="row-head">
-        <h2 className="row-title">{title}</h2>
+        <h2 className={live ? "row-title live" : "row-title"}>{title}</h2>
         {more ? (
           <button type="button" className="row-more" onClick={more.onClick}>
             {more.label}

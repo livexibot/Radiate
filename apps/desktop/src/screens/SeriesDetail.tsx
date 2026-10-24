@@ -65,11 +65,11 @@ export function SeriesDetail({ id }: { id: string }) {
               {info.plot ? <p>{info.plot}</p> : null}
               <div className="btns">
                 {resume ? (
-                  <button type="button" className="btn pri" onClick={() => play(resume)}>
+                  <button type="button" className="btn pri lg" onClick={() => play(resume)}>
                     <Icon name="play" /> {(resume.progress ?? 0) > 0.01 ? "Resume" : "Play"} S{resume.season} · E{resume.episode}
                   </button>
                 ) : info.seasons[0]?.episodes[0] ? (
-                  <button type="button" className="btn pri" onClick={() => play(info.seasons[0]!.episodes[0]!)}>
+                  <button type="button" className="btn pri lg" onClick={() => play(info.seasons[0]!.episodes[0]!)}>
                     <Icon name="play" /> Play S1 · E1
                   </button>
                 ) : null}
