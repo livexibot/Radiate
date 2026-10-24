@@ -18,12 +18,13 @@ AppImage, `.deb` or `.rpm` for Linux. Radiate updates itself after that.
 - **Live sports first.** Home opens on the matches on now and the ones
   starting soon, from your favorites and every sports group. Live and the
   guide have a Sports view, and you choose which groups count as sports.
-- **Watch with a reactor.** Save YouTube reactors by link, then show one
-  in a box beside the match: drag it anywhere, resize it by its corners,
-  and the match makes room. It opens where you left it. If the reactor is
-  behind your feed, hold the match back a few seconds to line them up.
-  It's YouTube's own player; a video that doesn't allow other apps opens
-  on youtube.com in its own window instead.
+- **Watch with reactors.** Save YouTube reactors by link, then show up to
+  four at once, each in a box beside the match: drag them anywhere, resize
+  them to any shape by their corners and edges, and the match makes room.
+  Each box has its own volume and mute, and opens where you left it. If
+  the reactors are behind your feed, hold the match back a few seconds to
+  line them up. It's YouTube's own player; a video that doesn't allow
+  other apps opens on youtube.com in its own window instead.
 - **Rewind live TV.** Drag the progress bar back to see a goal again, up
   to the last 5 minutes, then forward or straight back to live.
 - **Your sources.** M3U and M3U8 playlists by link or file, Xtream Codes

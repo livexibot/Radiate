@@ -10,46 +10,85 @@ export interface Reactor {
 }
 
 export type OverlaySize = "s" | "m" | "l";
-export type OverlaySide = "left" | "right";
+export type OverlaySide = "left" | "right" | "both";
 
-/** Where the box was left: left and top as shares of the player's width and height, width as a share of its width. */
+/**
+ * Where a box was left: left, top, width and height as shares of the player. Boxes saved before
+ * they could take any shape have no height and are 16:9.
+ */
 export interface BoxPrefs {
   x: number;
   y: number;
   w: number;
+  h?: number | null;
+}
+
+/** One reactor's box and sound. */
+export interface ReactorView {
+  /** Set once the box is moved or resized; until then size and side place it. */
+  box: BoxPrefs | null;
+  /** 0 to 100. */
+  volume: number;
+  muted: boolean;
 }
 
 export interface OverlayPrefs {
   size: OverlaySize;
   side: OverlaySide;
-  /** Reactor volume, 0 to 100. */
+  /** The volume a reactor starts at, 0 to 100. */
   volume: number;
-  /** Seconds the match is held back to line up with the reactor. */
+  /** Seconds the match is held back to line up with the reactors. */
   delay: number;
-  /** Set once the box is moved or resized; until then size and side place it. */
+  /** The box saved when only one reactor could be shown; the first reactor without a box of its own takes it. */
   box: BoxPrefs | null;
+  /** Each reactor's box and sound, by reactor id. */
+  views: Record<string, ReactorView>;
 }
 
-export const DEFAULT_OVERLAY: OverlayPrefs = { size: "m", side: "left", volume: 80, delay: 0, box: null };
+export const DEFAULT_OVERLAY: OverlayPrefs = { size: "m", side: "left", volume: 80, delay: 0, box: null, views: {} };
 export const MAX_DELAY = 60;
+/** Reactors on screen at once. */
+export const MAX_REACTORS = 4;
+const MAX_VIEWS = 64;
+const VIEW_KEY = /^[A-Za-z0-9_-]{1,64}$/;
 
 export function overlayPrefs(p: Partial<OverlayPrefs> | null | undefined): OverlayPrefs {
   const o = { ...DEFAULT_OVERLAY, ...(p ?? {}) };
+  const volume = clamp(Math.round(Number(o.volume)), 0, 100, DEFAULT_OVERLAY.volume);
   return {
     size: o.size === "s" || o.size === "l" ? o.size : "m",
-    side: o.side === "right" ? "right" : "left",
-    volume: clamp(Math.round(Number(o.volume)), 0, 100, DEFAULT_OVERLAY.volume),
+    side: o.side === "right" || o.side === "both" ? o.side : "left",
+    volume,
     delay: clamp(Math.round(Number(o.delay)), 0, MAX_DELAY, 0),
     box: boxOf(o.box),
+    views: viewsOf(o.views, volume),
   };
+}
+
+/** A reactor's box and sound, or how it starts out. */
+export function viewOf(o: OverlayPrefs, id: string): ReactorView {
+  return o.views[id] ?? { box: null, volume: o.volume, muted: false };
+}
+
+function viewsOf(v: unknown, volume: number): Record<string, ReactorView> {
+  const out: Record<string, ReactorView> = {};
+  if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+  for (const [id, x] of Object.entries(v as Record<string, unknown>).slice(0, MAX_VIEWS)) {
+    if (!VIEW_KEY.test(id) || !x || typeof x !== "object") continue;
+    const r = x as Record<string, unknown>;
+    out[id] = { box: boxOf(r.box), volume: clamp(Math.round(Number(r.volume)), 0, 100, volume), muted: r.muted === true };
+  }
+  return out;
 }
 
 function boxOf(b: unknown): BoxPrefs | null {
   if (!b || typeof b !== "object") return null;
-  const { x, y, w } = b as Record<string, unknown>;
+  const { x, y, w, h } = b as Record<string, unknown>;
   const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : Number.NaN);
   if ([x, y, w].some((v) => Number.isNaN(n(v)))) return null;
-  return { x: clamp(n(x), 0, 1, 0), y: clamp(n(y), 0, 1, 0), w: clamp(n(w), 0.05, 0.6, 0.3) };
+  const box: BoxPrefs = { x: clamp(n(x), 0, 1, 0), y: clamp(n(y), 0, 1, 0), w: clamp(n(w), 0.05, 1, 0.3) };
+  if (!Number.isNaN(n(h))) box.h = clamp(n(h), 0.05, 1, 0.3);
+  return box;
 }
 
 function clamp(n: number, lo: number, hi: number, fallback: number): number {

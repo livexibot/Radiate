@@ -1,19 +1,22 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { errorMessage } from "../api";
 import { Icon } from "../components/Icon";
 import { closeWindow, embedUrl, liveNow, onMainWindowMoved, onWindowClosed, openWindow, placeWindow } from "./api";
-import { moveBox, resizeBox, type Corner, type Rect } from "./box";
+import { moveBox, resizeBox, type Handle, type Rect } from "./box";
 import { YtBridge, type PlayerState } from "./bridge";
-import { canOpenOnYouTube, playerErrorText, type OverlayPrefs, type Reactor } from "./link";
+import { canOpenOnYouTube, playerErrorText, type Reactor, type ReactorView } from "./link";
 import "./reactor.css";
 
 /** How often an offline channel is checked again while the overlay is open. */
 const RECHECK_MS = 120_000;
-const CORNERS: Corner[] = ["nw", "ne", "sw", "se"];
+const HANDLES: Handle[] = ["n", "s", "e", "w", "nw", "ne", "sw", "se"];
+const CURSOR: Record<Handle | "move", string> = { move: "grabbing", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize", nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize" };
 
 interface Props {
   reactor: Reactor;
-  overlay: OverlayPrefs;
+  /** Its box and sound. */
+  view: ReactorView;
   /** Where the box is, in pixels of the player. */
   rect: Rect;
   /** The player's size in pixels. */
@@ -21,6 +24,7 @@ interface Props {
   /** Player controls are showing (the overlay shows its name and close button then). */
   chrome: boolean;
   onClose: () => void;
+  onMute: () => void;
   /** Called after YouTube's player takes keyboard focus, so the player can take it back. */
   onFocusLeft?: () => void;
   /** The box while it is being moved or resized; null when a drag ends without a change. */
@@ -31,7 +35,7 @@ interface Props {
 
 type Show = { videoId: string | null; channelId: string | null };
 type Failure = { text: string; canOpen: boolean };
-type Drag = { kind: "move" | Corner; pointer: number; sx: number; sy: number; start: Rect; last: Rect };
+type Drag = { kind: "move" | Handle; pointer: number; sx: number; sy: number; start: Rect; last: Rect };
 
 /** Where an element is in the window, in CSS pixels. */
 function screenRect(el: HTMLElement | null) {
@@ -39,8 +43,8 @@ function screenRect(el: HTMLElement | null) {
   return r ? { x: r.left, y: r.top, w: r.width, h: r.height } : null;
 }
 
-/** YouTube's own embedded player in a box over the match, which can be moved and resized. */
-export function ReactorOverlay({ reactor, overlay, rect, area, chrome, onClose, onFocusLeft, onDrag, onDrop }: Props) {
+/** YouTube's own embedded player in a box over the match, which can be moved and resized to any shape. */
+export function ReactorOverlay({ reactor, view, rect, area, chrome, onClose, onMute, onFocusLeft, onDrag, onDrop }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const bridge = useRef<YtBridge | null>(null);
@@ -53,9 +57,10 @@ export function ReactorOverlay({ reactor, overlay, rect, area, chrome, onClose, 
   const [external, setExternal] = useState(false);
   const [opening, setOpening] = useState(false);
   const drag = useRef<Drag | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const volume = useRef(overlay.volume);
-  volume.current = overlay.volume;
+  const [dragging, setDragging] = useState<Drag["kind"] | null>(null);
+  const sound = view.muted ? 0 : view.volume;
+  const volume = useRef(sound);
+  volume.current = sound;
 
   // What to show: a video as is; for a channel, what it is streaming now.
   useEffect(() => {
@@ -134,8 +139,8 @@ export function ReactorOverlay({ reactor, overlay, rect, area, chrome, onClose, 
   }, [src, external]);
 
   useEffect(() => {
-    bridge.current?.setVolume(overlay.volume);
-  }, [overlay.volume]);
+    bridge.current?.setVolume(sound);
+  }, [sound]);
 
   // Clicking YouTube's player moves keyboard focus into it; hand it back so
   // the remote-style keys keep working.
@@ -163,25 +168,25 @@ export function ReactorOverlay({ reactor, overlay, rect, area, chrome, onClose, 
     let stopClosed: (() => void) | null = null;
     let stopMoved: (() => void) | null = null;
     let alive = true;
-    void onWindowClosed(() => setExternal(false)).then((s) => (alive ? (stopClosed = s) : s()));
+    void onWindowClosed(reactor.id, () => setExternal(false)).then((s) => (alive ? (stopClosed = s) : s()));
     void onMainWindowMoved(() => {
       const r = screenRect(box.current);
-      if (r) void placeWindow(r).catch(() => undefined);
+      if (r) void placeWindow(reactor.id, r).catch(() => undefined);
     }).then((s) => (alive ? (stopMoved = s) : s()));
     return () => {
       alive = false;
       stopClosed?.();
       stopMoved?.();
     };
-  }, [external]);
+  }, [external, reactor.id]);
   useEffect(() => {
     if (!external || dragging) return;
     const r = screenRect(box.current);
-    if (r) void placeWindow(r).catch(() => undefined);
-  }, [external, dragging, rect.x, rect.y, rect.w, rect.h]);
+    if (r) void placeWindow(reactor.id, r).catch(() => undefined);
+  }, [external, dragging, reactor.id, rect.x, rect.y, rect.w, rect.h]);
   useEffect(() => {
     setExternal(false);
-    return () => void closeWindow().catch(() => undefined);
+    return () => void closeWindow(reactor.id).catch(() => undefined);
   }, [reactor.id]);
 
   const openExternal = async () => {
@@ -189,7 +194,7 @@ export function ReactorOverlay({ reactor, overlay, rect, area, chrome, onClose, 
     if (!r || opening) return;
     setOpening(true);
     try {
-      await openWindow(show ?? { videoId: reactor.videoId, channelId: reactor.channelId }, reactor.name, r);
+      await openWindow(reactor.id, show ?? { videoId: reactor.videoId, channelId: reactor.channelId }, reactor.name, r);
       setExternal(true);
     } catch (e) {
       setError({ text: errorMessage(e), canOpen: false });
@@ -198,7 +203,8 @@ export function ReactorOverlay({ reactor, overlay, rect, area, chrome, onClose, 
     }
   };
 
-  // Move by the name bar, resize by the corners.
+  // Move by the name bar, resize by the corners and edges. Moves are followed on the window, so
+  // nothing under the pointer (another reactor's player) can take them.
   const begin = (kind: Drag["kind"]) => (e: React.PointerEvent<HTMLElement>) => {
     if (e.button !== 0 || (kind === "move" && (e.target as HTMLElement).closest("button"))) return;
     e.preventDefault();
@@ -206,28 +212,43 @@ export function ReactorOverlay({ reactor, overlay, rect, area, chrome, onClose, 
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
-      /* not a live pointer (synthetic events); moves still arrive while over the handle */
+      /* not a live pointer (synthetic events); the window still sees the moves */
     }
     drag.current = { kind, pointer: e.pointerId, sx: e.clientX, sy: e.clientY, start: rect, last: rect };
-    setDragging(true);
+    setDragging(kind);
+    onDrag(rect);
   };
-  const follow = (e: React.PointerEvent<HTMLElement>) => {
-    const d = drag.current;
-    if (!d || e.pointerId !== d.pointer) return;
-    const dx = e.clientX - d.sx;
-    const dy = e.clientY - d.sy;
-    d.last = d.kind === "move" ? moveBox(d.start, dx, dy, area.w, area.h) : resizeBox(d.start, d.kind, dx, dy, area.w, area.h);
-    onDrag(d.last);
-  };
-  const end = (e: React.PointerEvent<HTMLElement>) => {
-    const d = drag.current;
-    if (!d || e.pointerId !== d.pointer) return;
-    drag.current = null;
-    setDragging(false);
-    if (d.last === d.start) onDrag(null);
-    else onDrop(d.last);
-  };
-  const handlers = (kind: Drag["kind"]) => ({ onPointerDown: begin(kind), onPointerMove: follow, onPointerUp: end, onPointerCancel: end });
+  const latest = useRef({ area, onDrag, onDrop });
+  latest.current = { area, onDrag, onDrop };
+  const isDragging = dragging !== null;
+  useEffect(() => {
+    if (!isDragging) return;
+    const follow = (e: PointerEvent) => {
+      const d = drag.current;
+      if (!d || e.pointerId !== d.pointer) return;
+      const { w, h } = latest.current.area;
+      const dx = e.clientX - d.sx;
+      const dy = e.clientY - d.sy;
+      d.last = d.kind === "move" ? moveBox(d.start, dx, dy, w, h) : resizeBox(d.start, d.kind, dx, dy, w, h, e.shiftKey);
+      latest.current.onDrag(d.last);
+    };
+    const end = (e: PointerEvent) => {
+      const d = drag.current;
+      if (!d || e.pointerId !== d.pointer) return;
+      drag.current = null;
+      setDragging(null);
+      if (d.last === d.start) latest.current.onDrag(null);
+      else latest.current.onDrop(d.last);
+    };
+    window.addEventListener("pointermove", follow);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    return () => {
+      window.removeEventListener("pointermove", follow);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+  }, [isDragging]);
 
   const style = { left: rect.x, top: rect.y, width: rect.w, height: rect.h };
   const cls = `reactor${chrome ? " chrome" : ""}${dragging ? " drag" : ""}`;
@@ -255,7 +276,7 @@ export function ReactorOverlay({ reactor, overlay, rect, area, chrome, onClose, 
               type="button"
               className="btn"
               onClick={() => {
-                void closeWindow().catch(() => undefined);
+                void closeWindow(reactor.id).catch(() => undefined);
                 setExternal(false);
               }}
             >
@@ -273,16 +294,19 @@ export function ReactorOverlay({ reactor, overlay, rect, area, chrome, onClose, 
           ) : null}
         </div>
       ) : null}
-      {dragging ? <div className="reactor-shield" /> : null}
-      <div className="reactor-tag" {...handlers("move")}>
+      {dragging ? createPortal(<div className="reactor-shield" style={{ cursor: CURSOR[dragging] }} />, document.body) : null}
+      <div className="reactor-tag" onPointerDown={begin("move")}>
         <span className="ellipsis">{reactor.name}</span>
         {offline && !error ? <span className="reactor-off">Not live</span> : null}
+        <button type="button" className="reactor-x" aria-label={view.muted ? `Unmute ${reactor.name}` : `Mute ${reactor.name}`} aria-pressed={view.muted} onClick={onMute}>
+          <Icon name={view.muted ? "mute" : "volume"} />
+        </button>
         <button type="button" className="reactor-x" aria-label="Close reactor" onClick={onClose}>
           <Icon name="close" />
         </button>
       </div>
-      {CORNERS.map((c) => (
-        <span key={c} className={`reactor-grip ${c}`} aria-hidden="true" {...handlers(c)} />
+      {HANDLES.map((c) => (
+        <span key={c} className={`reactor-grip ${c}`} aria-hidden="true" onPointerDown={begin(c)} />
       ))}
     </div>
   );

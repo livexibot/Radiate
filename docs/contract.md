@@ -126,8 +126,11 @@ pub struct Prefs {                     // free-form but typed where the UI depen
 // Fields the UI keeps in `extra`:
 //   sportsGroups: { include: string[], exclude: string[] }   group ids marked as sports, or not, against the name rules
 //   reactors: { id, name, url, kind: "video" | "channel", videoId, channelId }[]   saved YouTube reactors
-//   reactorOverlay: { size: "s" | "m" | "l", side: "left" | "right", volume: 0..100, delay: 0..60,
-//                     box: { x, y, w } | null }   box: where it was moved, as shares of the player (left, top, width); null = size and side place it
+//   reactorOverlay: { size: "s" | "m" | "l", side: "left" | "right" | "both", volume: 0..100, delay: 0..60,
+//                     box: { x, y, w } | null,   (from 0.3: the one box; the first reactor without its own box takes it)
+//                     views: { [reactorId]: { box: { x, y, w, h } | null, volume: 0..100, muted: boolean } } }
+//                     a box is where it was moved, as shares of the player (left, top, width, height; no height = 16:9);
+//                     null = size and side place it. volume is the one a reactor starts at.
 pub struct EpgCandidate { epg_channel_id: String, display_name: String, icon: Option<String>, score: f32 }
 pub struct Progress { source_id: String, phase: String, done: u32, total: Option<u32> }  // phase: "playlist" | "guide" | "vod" | "matching" | "done"
 ```
@@ -332,14 +335,14 @@ messages back up as `{ radiate: "yt", data }`.
 | `youtube_resolve` | `{ url }` | `{ kind: "video" \| "channel", videoId, channelId, title }` (handles like `@name` are looked up on youtube.com) |
 | `youtube_live_now` | `{ channelId }` | `string \| null`, the video the channel is streaming live now |
 | `reactor_embed_url` | `{ videoId?, channelId? }` | the relay's `/yt` page address |
-| `reactor_window_open` | `{ videoId?, channelId?, title, rect: { x, y, w, h } }` | opens youtube.com's page for the video (or the channel's live page) in the `youtube` window over `rect` (CSS pixels of the main window), or moves the open one there. The window shows only youtube.com and Google sign-in pages; other links open in the browser. It has no access to Radiate's commands and closes with the main window |
-| `reactor_window_place` | `{ rect }` | `boolean`: moves the `youtube` window over `rect`; false when it isn't open |
-| `reactor_window_close` | | closes the `youtube` window |
+| `reactor_window_open` | `{ key?, videoId?, channelId?, title, rect: { x, y, w, h } }` | opens youtube.com's page for the video (or the channel's live page) in the reactor's own window (`youtube-<key>`) over `rect` (CSS pixels of the main window), or moves the open one there. The window shows only youtube.com and Google sign-in pages; other links open in the browser. It has no access to Radiate's commands and closes with the main window |
+| `reactor_window_place` | `{ key?, rect }` | `boolean`: moves the reactor's window (without a key, any open one) over `rect`; false when it isn't open |
+| `reactor_window_close` | `{ key? }` | closes the reactor's window, or without a key all of them |
 
 Events (`listen`): `source-progress` (Progress), `source-updated` (Source),
 `stream-health` / `stream-failed` / `stream-closed` (StreamEvent payloads,
 camelCase), `connections-changed` (ConnectionUsage[]), `reactor-window`
-(`false` when the `youtube` window closes).
+(`{ key, open: false }` when a reactor's YouTube window closes).
 
 ## 4. UI (apps/desktop/src)
 

@@ -76,10 +76,11 @@ pub fn ffmpeg_args(input: &str, video: VideoMode, start: Option<f64>) -> Vec<Str
     a.extend(more.iter().map(|s| s.to_string()));
     let pic: &[&str] = match video {
         VideoMode::Copy => &["-c:v", "copy"],
-        // Interlaced TV pictures are deinterlaced; progressive ones pass through.
+        // Interlaced TV pictures are deinterlaced to a picture per field (50 a second for 50 Hz
+        // TV), so sport moves as smoothly as on TV; progressive ones pass through.
         VideoMode::H264 => &[
             "-vf",
-            "yadif=mode=send_frame:parity=auto:deint=interlaced",
+            "bwdif=mode=send_field:parity=auto:deint=interlaced",
             "-c:v",
             "libx264",
             "-preset",
@@ -324,6 +325,6 @@ mod tests {
         let live = ffmpeg_args("http://127.0.0.1:1/s/x/stream.ts", VideoMode::H264, None).join(" ");
         assert!(!live.contains("-ss"));
         assert!(live.contains("-c:v libx264"));
-        assert!(live.contains("yadif"));
+        assert!(live.contains("bwdif=mode=send_field"));
     }
 }

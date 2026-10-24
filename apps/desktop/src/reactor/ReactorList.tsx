@@ -2,13 +2,13 @@ import { useState } from "react";
 import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { AddReactor } from "./AddReactor";
-import type { OverlaySize, Reactor } from "./link";
+import type { OverlaySide, OverlaySize, Reactor } from "./link";
 import { useReactors } from "./useReactors";
 import "./reactor.css";
 
 /** Settings: saved reactors and where the overlay sits. */
 export function ReactorList() {
-  const { ready, reactors, overlay, remove, rename, setOverlay } = useReactors();
+  const { ready, reactors, overlay, remove, rename, setOverlay, setPreset } = useReactors();
   if (!ready) return <Skeleton h="10rem" r={14} />;
   return (
     <div className="set-stack">
@@ -26,7 +26,7 @@ export function ReactorList() {
       <section className="set-card">
         <div className="set-row">
           <span>Size</span>
-          <select className="input select" value={overlay.size} aria-label="Reactor size" onChange={(e) => void setOverlay({ size: e.target.value as OverlaySize })}>
+          <select className="input select" value={overlay.size} aria-label="Reactor size" onChange={(e) => void setPreset({ size: e.target.value as OverlaySize })}>
             <option value="s">Small</option>
             <option value="m">Medium</option>
             <option value="l">Large</option>
@@ -34,9 +34,10 @@ export function ReactorList() {
         </div>
         <div className="set-row">
           <span>Side</span>
-          <select className="input select" value={overlay.side} aria-label="Reactor side" onChange={(e) => void setOverlay({ side: e.target.value === "right" ? "right" : "left" })}>
+          <select className="input select" value={overlay.side} aria-label="Reactor side" onChange={(e) => void setPreset({ side: e.target.value as OverlaySide })}>
             <option value="left">Left</option>
             <option value="right">Right</option>
+            <option value="both">Both sides</option>
           </select>
         </div>
         <div className="set-row">

@@ -19,8 +19,9 @@ import { matchTrack, TrackMenu } from "../player/TrackMenu";
 import { useStream } from "../player/useStream";
 import { useZapList } from "../player/useZapList";
 import { VideoSurface, type FatalInfo, type MediaControl, type Tracks, type VideoStats } from "../player/VideoSurface";
-import { boxPrefs, boxRect, placeMatch, type Rect } from "../reactor/box";
+import { boxPrefs, layoutBoxes, placeMatch, type BoxPrefs, type Rect } from "../reactor/box";
 import { ReactorIcon } from "../reactor/icon";
+import { MAX_REACTORS, viewOf, type Reactor } from "../reactor/link";
 import { ReactorMenu } from "../reactor/ReactorMenu";
 import { ReactorOverlay } from "../reactor/ReactorOverlay";
 import { reactorSession, useReactors } from "../reactor/useReactors";
@@ -81,7 +82,7 @@ export function Player({ route }: { route: PlayerRoute }) {
   const [tracks, setTracks] = useState<Tracks>(noTracks);
   const [menu, setMenu] = useState<"audio" | "subtitles" | "reactor" | null>(null);
   const reactors = useReactors();
-  const [reactorId, setReactorId] = useState<string | null>(() => (isChannel ? reactorSession.get() : null));
+  const [reactorIds, setReactorIds] = useState<string[]>(() => (isChannel ? reactorSession.get() : []));
   const [hold, setHold] = useState<number | null>(null);
   const [ctxMenu, setCtxMenu] = useState<MenuState | null>(null);
   const [listOpen, setListOpen] = useState(false);
@@ -105,7 +106,7 @@ export function Player({ route }: { route: PlayerRoute }) {
   const appliedPrefFor = useRef<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [area, setArea] = useState({ w: 0, h: 0 });
-  const [dragBox, setDragBox] = useState<Rect | null>(null);
+  const [drag, setDrag] = useState<{ id: string; rect: Rect } | null>(null);
   const { setFavorite, hide } = useChannelActions();
 
   // The player's size, for the reactor box and the match beside it.
@@ -193,22 +194,28 @@ export function Player({ route }: { route: PlayerRoute }) {
       if (hideTimer.current) window.clearTimeout(hideTimer.current);
     };
   }, [poke]);
-  const reactor = isChannel && reactorId ? (reactors.reactors.find((r) => r.id === reactorId) ?? null) : null;
-  const pickReactor = useCallback((id: string | null) => {
-    setReactorId(id);
-    reactorSession.set(id);
-    if (id) reactorSession.setLast(id);
+  // The reactors shown, each in a box of its own.
+  const shown = useMemo(() => (isChannel ? reactorIds.map((id) => reactors.reactors.find((r) => r.id === id)).filter((r): r is Reactor => !!r) : []), [isChannel, reactorIds, reactors.reactors]);
+  const showReactors = useCallback((next: (ids: string[]) => string[]) => {
+    setReactorIds((ids) => {
+      const n = next(ids);
+      reactorSession.set(n);
+      return n;
+    });
   }, []);
+  const toggleOne = useCallback((id: string) => showReactors((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : ids.length >= MAX_REACTORS ? ids : [...ids, id])), [showReactors]);
   const toggleReactor = useCallback(() => {
-    if (reactor) {
-      pickReactor(null);
+    if (shown.length) {
+      showReactors(() => []);
       return;
     }
-    const last = reactorSession.last();
-    const saved = reactors.reactors.find((r) => r.id === last) ?? reactors.reactors[0];
-    if (saved) pickReactor(saved.id);
+    const saved = new Set(reactors.reactors.map((r) => r.id));
+    const last = reactorSession.last().filter((id) => saved.has(id));
+    const ids = last.length ? last : reactors.reactors.slice(0, 1).map((r) => r.id);
+    if (ids.length) showReactors(() => ids.slice(0, MAX_REACTORS));
     else setMenu("reactor");
-  }, [reactor, reactors.reactors, pickReactor]);
+  }, [shown.length, reactors.reactors, showReactors]);
+  const laidOut = useMemo(() => (shown.length && area.w > 0 && area.h > 0 ? layoutBoxes(shown.map((r) => r.id), reactors.overlay, area.w, area.h) : []), [shown, reactors.overlay, area.w, area.h]);
   const keepChrome = menu !== null || listOpen || ctxMenu !== null || state.status !== "ready" || !!fatal || paused;
 
   // VOD progress: every 10 s, on pause, at the end and on stop. Read from the video element
@@ -559,10 +566,10 @@ export function Player({ route }: { route: PlayerRoute }) {
   const progValue = isChannel ? (prog ? progressOf(prog.start, prog.stop, now) : 0) : time.dur ? time.cur / time.dur : 0;
   const zapList = zap.list ?? [];
 
-  // The reactor box, and the match moved out from under it.
-  const reactorBox = reactor && area.w > 0 && area.h > 0 ? (dragBox ?? boxRect(reactors.overlay, area.w, area.h)) : null;
+  // The reactor boxes, and the match moved out from under them.
+  const boxes = useMemo(() => (drag ? laidOut.map((r, i) => (shown[i]?.id === drag.id ? drag.rect : r)) : laidOut), [drag, laidOut, shown]);
   const aspect = stats && stats.width > 0 && stats.height > 0 ? stats.width / stats.height : 16 / 9;
-  const matchAt = reactorBox ? placeMatch(area.w, area.h, reactorBox, aspect) : null;
+  const matchAt = useMemo(() => (boxes.length ? placeMatch(area.w, area.h, boxes, aspect) : null), [boxes, area.w, area.h, aspect]);
   const picStyle = matchAt ? { left: matchAt.x, top: matchAt.y, width: matchAt.w, height: matchAt.h, right: "auto", bottom: "auto" } : undefined;
 
   return (
@@ -588,7 +595,7 @@ export function Player({ route }: { route: PlayerRoute }) {
         });
       }}
     >
-      <div className={dragBox ? "pic moving" : "pic"} style={picStyle}>
+      <div className={drag ? "pic moving" : "pic"} style={picStyle}>
         {channel ? (
           <span className={`stream-backdrop dim ${tone(channel.name)}`} aria-hidden="true">
             <span>{monogram(channel.name)}</span>
@@ -612,7 +619,7 @@ export function Player({ route }: { route: PlayerRoute }) {
             live={isChannel}
             rewind={isChannel}
             latency={prefs?.latency}
-            delay={reactor ? reactors.overlay.delay : 0}
+            delay={shown.length ? reactors.overlay.delay : 0}
             onHold={setHold}
             onLive={(w) => setLiveWin((o) => (o && w && Math.round(o.behind) === Math.round(w.behind) && Math.round(o.reach) === Math.round(w.reach) ? o : w))}
             onPlayState={(p) => {
@@ -630,23 +637,36 @@ export function Player({ route }: { route: PlayerRoute }) {
       </div>
       <div className="pshade" />
 
-      {reactor && reactorBox ? (
-        <ReactorOverlay
-          reactor={reactor}
-          overlay={reactors.overlay}
-          rect={reactorBox}
-          area={area}
-          chrome={showChrome}
-          onClose={() => pickReactor(null)}
-          onFocusLeft={() => rootRef.current?.focus()}
-          onDrag={setDragBox}
-          onDrop={(r) => {
-            setDragBox(r);
-            void reactors.setOverlay({ box: boxPrefs(r, area.w, area.h) }).finally(() => setDragBox(null));
-          }}
-        />
-      ) : null}
-      {hold !== null && reactor ? (
+      {shown.map((r, i) => {
+        const rect = boxes[i];
+        if (!rect) return null;
+        const view = viewOf(reactors.overlay, r.id);
+        return (
+          <ReactorOverlay
+            key={r.id}
+            reactor={r}
+            view={view}
+            rect={rect}
+            area={area}
+            chrome={showChrome}
+            onClose={() => showReactors((ids) => ids.filter((x) => x !== r.id))}
+            onMute={() => void reactors.setView(r.id, { muted: !view.muted })}
+            onFocusLeft={() => rootRef.current?.focus()}
+            onDrag={(at) => setDrag(at ? { id: r.id, rect: at } : null)}
+            onDrop={(at) => {
+              setDrag({ id: r.id, rect: at });
+              // Every box stays where it is now, the dropped one where it was left.
+              const save: Record<string, BoxPrefs> = {};
+              shown.forEach((o, j) => {
+                const b = o.id === r.id ? at : laidOut[j];
+                if (b) save[o.id] = boxPrefs(b, area.w, area.h);
+              });
+              void reactors.saveBoxes(save).finally(() => setDrag(null));
+            }}
+          />
+        );
+      })}
+      {hold !== null && shown.length ? (
         <div className="reactor-hold num" role="status">
           Holding the match {hold} s
         </div>
@@ -795,7 +815,7 @@ export function Player({ route }: { route: PlayerRoute }) {
             </button>
             {isChannel ? (
               <>
-                <button type="button" className={menu === "reactor" || reactor ? "cb on" : "cb"} onClick={() => setMenu(menu === "reactor" ? null : "reactor")} aria-haspopup="menu" aria-expanded={menu === "reactor"}>
+                <button type="button" className={menu === "reactor" || shown.length ? "cb on" : "cb"} onClick={() => setMenu(menu === "reactor" ? null : "reactor")} aria-haspopup="menu" aria-expanded={menu === "reactor"}>
                   <ReactorIcon /> Reactor
                 </button>
                 <button type="button" className="cb" onClick={() => navigate({ name: "multiview", channelId: target.id, ctx: ctx ?? undefined })}>
@@ -819,12 +839,13 @@ export function Player({ route }: { route: PlayerRoute }) {
         </div>
         {menu === "reactor" ? (
           <ReactorMenu
-            active={reactor?.id ?? null}
+            active={shown.map((r) => r.id)}
             canDelay={isChannel}
             onClose={() => setMenu(null)}
-            onPick={(id) => {
-              pickReactor(id);
-              if (!id) setMenu(null);
+            onToggle={toggleOne}
+            onHideAll={() => {
+              showReactors(() => []);
+              setMenu(null);
             }}
           />
         ) : menu ? (

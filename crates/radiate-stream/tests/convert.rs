@@ -273,6 +273,62 @@ async fn mpeg2_pictures_become_h264() {
     assert_eq!(codecs, vec!["h264", "aac"]);
 }
 
+/// How many pictures ffprobe counts in `bytes`.
+fn frames(ffprobe: &Path, bytes: &[u8], name: &str) -> u32 {
+    let p = scratch(name);
+    std::fs::write(&p, bytes).unwrap();
+    let o = Command::new(ffprobe)
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-count_frames",
+            "-show_entries",
+            "stream=nb_read_frames",
+            "-of",
+            "default=nw=1:nk=1",
+        ])
+        .arg(&p)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&o.stdout)
+        .lines()
+        .find_map(|l| l.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn interlaced_tv_becomes_a_picture_per_field() {
+    let (Some(ffmpeg), Some(ffprobe)) = (tool("ffmpeg"), tool("ffprobe")) else {
+        eprintln!("no ffmpeg here, skipped");
+        return;
+    };
+    // 25 interlaced frames a second: 50 fields.
+    let data = clip(
+        &ffmpeg,
+        "interlaced.ts",
+        &["-c:v", "mpeg2video", "-flags", "+ilme+ildct", "-top", "1"],
+        &["-c:a", "mp2"],
+        4,
+    );
+    assert_eq!(frames(&ffprobe, &data, "interlaced-in.ts"), 100);
+    let (url, _) = serve(data, "video/mp2t").await;
+    let hub = hub(ffmpeg).await;
+    let id = open(&hub, url, StreamKind::MpegTs);
+    let conv = hub.convert_url(&id).unwrap();
+    let bytes = client()
+        .get(format!("{conv}?v=h264"))
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    let n = frames(&ffprobe, &bytes, "per-field.ts");
+    assert!((195..=205).contains(&n), "50 pictures a second: {n}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_new_conversion_stops_the_last_and_nothing_without_ffmpeg() {
     let Some(ffmpeg) = tool("ffmpeg") else {

@@ -54,30 +54,31 @@ export interface BoxOnScreen {
 
 /**
  * Opens youtube.com's own page for a video or a channel's stream in a window of its own over the
- * reactor box. For videos whose owner doesn't allow them in other apps.
+ * reactor box. For videos whose owner doesn't allow them in other apps. Each reactor (`key`) has
+ * its own window.
  */
-export async function openWindow(target: { videoId?: string | null; channelId?: string | null }, title: string, rect: BoxOnScreen): Promise<void> {
-  if (isTauri) return invoke<void>("reactor_window_open", { videoId: target.videoId ?? null, channelId: target.channelId ?? null, title, rect });
+export async function openWindow(key: string, target: { videoId?: string | null; channelId?: string | null }, title: string, rect: BoxOnScreen): Promise<void> {
+  if (isTauri) return invoke<void>("reactor_window_open", { key, videoId: target.videoId ?? null, channelId: target.channelId ?? null, title, rect });
   const url = target.videoId ? `https://www.youtube.com/watch?v=${encodeURIComponent(target.videoId)}` : `https://www.youtube.com/channel/${encodeURIComponent(target.channelId ?? "")}/live`;
-  window.open(url, "radiate-youtube", `popup,width=${Math.round(rect.w)},height=${Math.round(rect.h + 56)}`);
+  window.open(url, `radiate-youtube-${key}`, `popup,width=${Math.round(rect.w)},height=${Math.round(rect.h + 56)}`);
 }
 
-/** Moves the YouTube window back over the box; false when it isn't open. */
-export async function placeWindow(rect: BoxOnScreen): Promise<boolean> {
+/** Moves a reactor's YouTube window back over its box; false when it isn't open. */
+export async function placeWindow(key: string, rect: BoxOnScreen): Promise<boolean> {
   if (!isTauri) return false;
-  return invoke<boolean>("reactor_window_place", { rect });
+  return invoke<boolean>("reactor_window_place", { key, rect });
 }
 
-export async function closeWindow(): Promise<void> {
-  if (isTauri) await invoke<void>("reactor_window_close", {});
+export async function closeWindow(key: string): Promise<void> {
+  if (isTauri) await invoke<void>("reactor_window_close", { key });
 }
 
-/** Calls back when the YouTube window is closed. Returns a function that stops listening. */
-export async function onWindowClosed(cb: () => void): Promise<() => void> {
+/** Calls back when a reactor's YouTube window is closed. Returns a function that stops listening. */
+export async function onWindowClosed(key: string, cb: () => void): Promise<() => void> {
   if (!isTauri) return () => undefined;
   const { listen } = await import("@tauri-apps/api/event");
-  return listen<boolean>("reactor-window", (e) => {
-    if (e.payload === false) cb();
+  return listen<{ key?: string; open?: boolean }>("reactor-window", (e) => {
+    if (e.payload?.key === key && e.payload.open === false) cb();
   });
 }
 

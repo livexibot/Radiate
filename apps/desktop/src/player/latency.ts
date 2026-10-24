@@ -22,7 +22,9 @@ export function latencyOf(pref: unknown): LatencyPref {
  */
 export function hlsConfig(latency: LatencyPref, live: boolean, rewind = false): Record<string, unknown> {
   if (!live) return { enableWorker: true, backBufferLength: 30, lowLatencyMode: false, maxBufferLength: 30, maxMaxBufferLength: 120 };
-  const base = { enableWorker: true, backBufferLength: rewind ? REWIND_SECS : 30 };
+  // Live IPTV playlists often leave small gaps between segments: play over them, and keep
+  // nudging a picture that sticks at one, rather than stall.
+  const base = { enableWorker: true, backBufferLength: rewind ? REWIND_SECS : 30, startFragPrefetch: true, maxBufferHole: 0.5, nudgeMaxRetry: 10 };
   // Normal and stable start this far behind the edge, so everything up to the edge is there to
   // load at once (see startBufferSecs); further with long segments once the playlist says how
   // long they are (see hlsLive).

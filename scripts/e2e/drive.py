@@ -743,14 +743,16 @@ class Run:
         r.ok(ahead0 >= 9.5 or abs(v["rate"] - 0.95) < 0.01, f"short of 10 s ahead it plays at {v['rate']}x")
         samples = []
         grows = []
+        self.s.js("window.__waits = 0; document.querySelector('video').addEventListener('waiting', () => window.__waits++);")
         for _ in range(10):
             time.sleep(1)
             x = self.s.video() or {}
             samples.append(x.get("t"))
             grows.append(round(x["buffered"][-1][1] - x["t"], 2) if x.get("buffered") else 0)
         stats = self.s.js("const v=document.querySelector('video'); const q=v.getVideoPlaybackQuality? v.getVideoPlaybackQuality():null; return q?{dropped:q.droppedVideoFrames,total:q.totalVideoFrames}:null;")
+        waits = self.s.js("return window.__waits")
         steps = [round(b - a, 2) for a, b in zip(samples, samples[1:]) if a is not None and b is not None]
-        r.ok(all(0.6 <= s <= 1.4 for s in steps), f"live TS advances smoothly: per-second steps {steps}; frames {stats}")
+        r.ok(all(0.6 <= s <= 1.4 for s in steps) and waits == 0, f"live TS advances smoothly: per-second steps {steps}, {waits} waits; frames {stats}")
         r.ok(grows[-1] - grows[0] >= 0.25 or grows[-1] >= 9.5, f"the buffer builds up while playing: {grows[0]} -> {grows[-1]} s ahead")
         buf = self.s.video() or {}
         r.note(f"live buffer {buf.get('buffered')} at {buf.get('t')}")
@@ -1057,13 +1059,18 @@ class Run:
         m = pic()
         r.ok(covered() <= 0.16 and m["x"] + m["w"] <= moved["x"] + moved["pw"] * 0.2, f"the match moves to the other side: {round(covered() * 100)}% of the box over it, picture {m}")
         b = moved
-        self.s.drag(b["x"] + b["pw"] - 6, b["y"] + b["ph"] - 6, b["x"] + b["pw"] - 6 - 160, b["y"] + b["ph"] - 6)
+        self.s.drag(b["x"] + b["pw"] - 6, b["y"] + b["ph"] - 6, b["x"] + b["pw"] - 6 - 160, b["y"] + b["ph"] - 6 + 60)
         sized = self.s.wait("box resized", lambda: (x := box()) and x["pw"] < b["pw"] - 100 and x, timeout=5)
-        r.ok(abs(sized["x"] - b["x"]) <= 1 and abs(sized["y"] - b["y"]) <= 1 and 1.7 <= sized["ratio"] <= 1.8,
-             f"dragging the bottom-right corner resizes from the top-left and stays 16:9 ({round(b['pw'])} to {round(sized['pw'])} wide, ratio {sized['ratio']})")
-        saved = self.s.wait("box saved", lambda: (o := self.s.invoke("prefs_get")["reactorOverlay"]) and o.get("box") and o, timeout=5)  # type: ignore[index]
-        bx = saved["box"]
-        r.ok(abs(bx["x"] * sized["W"] - sized["x"]) <= 2 and abs(bx["w"] * sized["W"] - sized["pw"]) <= 2, f"where it was left is saved: {bx}")
+        r.ok(abs(sized["x"] - b["x"]) <= 1 and abs(sized["y"] - b["y"]) <= 1 and abs(sized["pw"] - (b["pw"] - 160)) <= 2 and abs(sized["ph"] - (b["ph"] + 60)) <= 2,
+             f"dragging the bottom-right corner resizes from the top-left to any shape ({round(b['pw'])}x{round(b['ph'])} to {round(sized['pw'])}x{round(sized['ph'])})")
+        b = sized
+        self.s.drag(b["x"] + 3, b["y"] + b["ph"] / 2, b["x"] + 3 - 80, b["y"] + b["ph"] / 2 + 40)
+        edged = self.s.wait("box widened", lambda: (x := box()) and x["pw"] > b["pw"] + 60 and x, timeout=5)
+        r.ok(abs(edged["x"] - (b["x"] - 80)) <= 2 and abs(edged["ph"] - b["ph"]) <= 1 and abs(edged["y"] - b["y"]) <= 1, f"dragging the left edge widens it and nothing else ({round(b['pw'])} to {round(edged['pw'])} wide)")
+        sized = edged
+        view = lambda: ((self.s.invoke("prefs_get")["reactorOverlay"] or {}).get("views") or {}).get("rtest") or {}  # type: ignore[index]  # noqa: E731
+        bx = self.s.wait("box saved", lambda: (v := view()) and v.get("box") and abs(v["box"]["w"] * sized["W"] - sized["pw"]) <= 2 and v["box"], timeout=5)
+        r.ok(abs(bx["x"] * sized["W"] - sized["x"]) <= 2 and abs(bx["h"] * sized["H"] - sized["ph"]) <= 2, f"where it was left is saved: {bx}")
         self.shot("reactor-moved")
         # next time: the same place
         self.leave_player()
@@ -1071,8 +1078,8 @@ class Run:
         self.wait_playing(min_t=0.5, timeout=40)
         self.s.key("r")
         again = self.s.wait("reactor box again", lambda: (x := box()) and x["src"] and x, timeout=15)
-        r.ok(abs(again["x"] - sized["x"]) <= 2 and abs(again["y"] - sized["y"]) <= 2 and abs(again["pw"] - sized["pw"]) <= 2,
-             f"the next time it opens where it was left ({round(again['x'])},{round(again['y'])}, {round(again['pw'])} wide)")
+        r.ok(abs(again["x"] - sized["x"]) <= 2 and abs(again["y"] - sized["y"]) <= 2 and abs(again["pw"] - sized["pw"]) <= 2 and abs(again["ph"] - sized["ph"]) <= 2,
+             f"the next time it opens where it was left ({round(again['x'])},{round(again['y'])}, {round(again['pw'])}x{round(again['ph'])})")
 
         # a video whose owner doesn't allow other apps: say so and offer youtube.com in its own window
         self.s.js(
@@ -1107,7 +1114,8 @@ class Run:
         b = self.s.wait("box moved", lambda: (x := box()) and x["right"] <= 40 and x["w"] >= 0.38 and x, timeout=5)
         r.ok(True, f"menu: large on the right ({b})")
         saved = self.s.invoke("prefs_get")["reactorOverlay"]  # type: ignore[index]
-        r.ok(saved.get("size") == "l" and saved.get("side") == "right" and saved.get("box") is None, f"overlay settings saved, and a preset puts the box back: {saved}")
+        r.ok(saved.get("size") == "l" and saved.get("side") == "right" and saved.get("box") is None and not (saved.get("views") or {}).get("rtest", {}).get("box"),
+             f"overlay settings saved, and a preset puts the box back: {saved}")
 
         # hold the match back 5 s
         self.s.click("//*[contains(@class,'reactmenu')]//button[@aria-label='Five seconds more delay']")
@@ -1163,7 +1171,29 @@ class Run:
         b = self.s.wait("new reactor shown", lambda: (x := box()) and x["src"] and "zyxWVU98_-a" in x["src"] and x, timeout=20)
         names = [x["name"] for x in self.s.invoke("prefs_get")["reactors"]]  # type: ignore[index]
         r.ok(len(names) == 2, f"a video link is saved and shown at once: {names}")
-        self.s.key("Escape")
+
+        # two at once: each in its own box, the match out from under both, each with its own sound
+        self.s.click("//*[contains(@class,'reactmenu')]//button[@role='menuitemcheckbox'][contains(.,'Test Reactor')]")
+        two = self.s.wait("two boxes", lambda: (x := self.s.js(
+            "const p = document.querySelector('.player').getBoundingClientRect(), m = document.querySelector('.pic').getBoundingClientRect();"
+            "const bs = [...document.querySelectorAll('.reactor')].map((b) => b.getBoundingClientRect());"
+            "const ov = (a, c) => Math.max(0, Math.min(a.right, c.right) - Math.max(a.left, c.left)) * Math.max(0, Math.min(a.bottom, c.bottom) - Math.max(a.top, c.top));"
+            "return {n: bs.length, inside: bs.every((b) => b.left >= p.left - 1 && b.right <= p.right + 1 && b.top >= p.top - 1 && b.bottom <= p.bottom + 1),"
+            " apart: bs.length < 2 || ov(bs[0], bs[1]) < 1, covered: bs.map((b) => +(ov(b, m) / Math.min(b.width * b.height, m.width * m.height)).toFixed(3)),"
+            " frames: [...document.querySelectorAll('.reactor iframe')].map((f) => f.src)};")) and x["n"] == 2 and len(x["frames"]) == 2 and x, timeout=15)
+        r.ok(two["inside"] and two["apart"] and all(c <= 0.16 for c in two["covered"]) and len(set(two["frames"])) == 2,
+             f"two reactors at once, apart, the match under at most 15% of either: {two['covered']}")
+        self.s.key("Escape", target="active")  # the link field has focus
+        time.sleep(0.3)
+        self.s.click("//*[contains(@class,'reactor')][@data-reactor='rtest']//button[contains(@aria-label,'Mute')]")
+        muted = self.s.wait("muted", lambda: (v := view()) and v.get("muted") and v, timeout=5)
+        others = [k for k, v in ((self.s.invoke("prefs_get")["reactorOverlay"] or {}).get("views") or {}).items() if v.get("muted")]  # type: ignore[index]
+        r.ok(bool(muted) and others == ["rtest"], f"each box mutes its own sound: muted {others}")
+        self.s.key("r")
+        self.s.wait("boxes gone", lambda: box() is None, timeout=5)
+        self.s.key("r")
+        back = self.s.wait("both back", lambda: (n := self.s.js("return document.querySelectorAll('.reactor').length")) == 2 and n, timeout=10)
+        r.ok(back == 2, "R hides both and brings both back")
         self.s.invoke("prefs_set", {"patch": {"reactorOverlay": {"size": "m", "side": "left", "volume": 80, "delay": 0}}})
         self.leave_player()
         st = provider_stats(self.args.port)

@@ -609,6 +609,8 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
     let lastTime = -1;
     let stuckSecs = 0;
     let stallReported = false;
+    // Seconds the picture has stood still with plenty buffered ahead.
+    let frozenSecs = 0;
     const followTimer =
       isLive && kind === "mpegts"
         ? window.setInterval(() => {
@@ -641,6 +643,17 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
         if (liveTicks >= 2) backToLive();
         reportLive();
       }
+      // MPEG-TS whose picture stands still with seconds buffered ahead (the decoder lost its
+      // place at a hole or a jump in the stream): a small step forward gets it going again.
+      // hls.js does the same for HLS.
+      if (kind === "mpegts" && !video.paused && !video.seeking && !video.ended && video.currentTime === lastTime) {
+        const span = playableSpan(video.buffered, video.currentTime);
+        frozenSecs = span && span.end - video.currentTime > 1 ? frozenSecs + 1 : 0;
+        if (frozenSecs >= 2) {
+          frozenSecs = 0;
+          video.currentTime += 0.1;
+        }
+      } else frozenSecs = 0;
       const stopped = { message: "The stream stopped. The provider may be having trouble.", decode: false };
       stuckSecs = stallStep(stuckSecs, lastTime, {
         currentTime: video.currentTime,

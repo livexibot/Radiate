@@ -57,7 +57,7 @@ page.
   mpegts.js's live sync, so it can stop while you watch from behind; HLS
   switches hls.js to `HLS_BEHIND`.
 - The reactor box moves by its name bar and resizes by its corners
-  (16:9), and opens where it was left next time (`reactorOverlay.box`);
+  (16:9 until 0.4.0), and opens where it was left next time (`reactorOverlay.box`);
   the Size and Side presets put it back. The match moves and shrinks so
   at most 15% of the box lies over it (`placeMatch` in `reactor/box.ts`):
   beside a 16:9 picture on a wide window it sits in the black bars.
@@ -92,6 +92,32 @@ page.
   channel explicitly; the end-to-end checks use it).
 - Colours, type sizes, spacing, radii and elevations are tokens in
   `styles/base.css`; screens use the tokens.
+
+## Decisions (24 October 2026, 0.4.0)
+
+- Up to four reactors at once (`MAX_REACTORS`), each in its own box with
+  its own volume and mute (`reactorOverlay.views`, by reactor id); R hides
+  them all and brings the same ones back. One "Delay match" holds the
+  match back for all of them. A reactor's youtube.com window is its own
+  (`youtube-<id>`). The Size and Side presets lay out every box (Side
+  "Both" takes turns, left first) and put moved boxes back.
+- Boxes resize to any shape by their corners and edges, from 160 x 90 px
+  up to the whole player; a corner dragged close to 16:9 snaps to it, and
+  Shift keeps the shape. Dropping a box saves where every box shown is,
+  so none of them moves when another one is shown or hidden. While a box
+  is dragged a sheet covers the window so no YouTube player takes the
+  pointer, and the player's top and bottom bars let the pointer through
+  their empty parts to the boxes under them.
+- The match makes room for every box: at most 15% of each box, or of the
+  match when that is smaller, lies over it. When the boxes leave less than
+  a fifth of its width, it stays full size under them.
+- Interlaced TV converted by ffmpeg becomes a picture per field (`bwdif`,
+  50 a second for 50 Hz TV) instead of one per frame, so converted sport
+  moves as smoothly as on TV.
+- A live MPEG-TS picture that stands still for 2 s with more than 1 s
+  buffered ahead is stepped forward 0.1 s; live HLS plays over gaps of up
+  to 0.5 s between segments and keeps nudging a stuck picture
+  (`maxBufferHole`, `nudgeMaxRetry`) instead of stalling.
 
 ## Layout
 

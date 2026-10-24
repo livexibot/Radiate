@@ -75,7 +75,7 @@ fn main() {
         }))
         .plugin(
             tauri_plugin_window_state::Builder::default()
-                .with_denylist(&[youtube::WINDOW])
+                .with_filter(|label| !youtube::is_window(label))
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
@@ -88,7 +88,7 @@ fn main() {
                 return;
             }
             match event {
-                // The YouTube window goes with the main one, so closing it quits.
+                // The YouTube windows go with the main one, so closing it quits.
                 WindowEvent::CloseRequested { .. } => youtube::close_window(window.app_handle()),
                 WindowEvent::Destroyed => {
                     youtube::close_window(window.app_handle());

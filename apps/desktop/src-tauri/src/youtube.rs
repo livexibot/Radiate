@@ -320,10 +320,48 @@ pub fn reactor_embed_url(
 // ---------------------------------------------------------------------------
 // youtube.com in a window of its own
 
-/// The YouTube window's label. There is only ever one.
+/// The YouTube windows' labels start with this; each reactor has its own window.
 pub const WINDOW: &str = "youtube";
-/// Sent to the app with `false` when the YouTube window closes.
+/// Sent to the app with the reactor's key and `open: false` when its YouTube window closes.
 pub const WINDOW_EVENT: &str = "reactor-window";
+
+#[derive(Debug, Clone, Serialize)]
+struct WindowClosed {
+    key: String,
+    open: bool,
+}
+
+/// The YouTube window's label for a reactor.
+pub fn window_label(key: Option<&str>) -> String {
+    let key: String = key
+        .unwrap_or("")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(48)
+        .collect();
+    if key.is_empty() {
+        WINDOW.to_string()
+    } else {
+        format!("{WINDOW}-{key}")
+    }
+}
+
+/// True for a YouTube window's label.
+pub fn is_window(label: &str) -> bool {
+    label == WINDOW || label.starts_with(&format!("{WINDOW}-"))
+}
+
+/// A reactor's YouTube window; without a key, any open one.
+fn find_window(app: &AppHandle, key: Option<&str>) -> Option<tauri::WebviewWindow> {
+    match key {
+        Some(k) => app.get_webview_window(&window_label(Some(k))),
+        None => app
+            .webview_windows()
+            .into_iter()
+            .find(|(label, _)| is_window(label))
+            .map(|(_, w)| w),
+    }
+}
 /// Height of youtube.com's top bar; the window is that much taller than the box
 /// so the player itself lines up with it.
 const MASTHEAD: f64 = 56.0;
@@ -394,6 +432,7 @@ fn open_in_browser(url: &Url) {
 #[tauri::command]
 pub async fn reactor_window_open(
     app: AppHandle,
+    key: Option<String>,
     video_id: Option<String>,
     channel_id: Option<String>,
     title: String,
@@ -409,7 +448,8 @@ pub async fn reactor_window_open(
     } else {
         format!("{} · YouTube", title.trim())
     };
-    if let Some(win) = app.get_webview_window(WINDOW) {
+    let label = window_label(key.as_deref());
+    if let Some(win) = app.get_webview_window(&label) {
         let fail = |e: tauri::Error| CmdError::new("window", e.to_string());
         if win.url().map_or(true, |u| u != url) {
             win.navigate(url).map_err(fail)?;
@@ -426,7 +466,7 @@ pub async fn reactor_window_open(
     let main = app
         .get_webview_window("main")
         .ok_or_else(|| CmdError::new("window", "Radiate's window isn't ready."))?;
-    let built = WebviewWindowBuilder::new(&app, WINDOW, WebviewUrl::External(url))
+    let built = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(url))
         .title(title)
         .inner_size(w, h)
         .position(x, y)
@@ -450,18 +490,23 @@ pub async fn reactor_window_open(
         });
     let win = built.map_err(|e| CmdError::new("window", e.to_string()))?;
     let handle = app.clone();
+    let key = key.unwrap_or_default();
     win.on_window_event(move |e| {
         if let tauri::WindowEvent::Destroyed = e {
-            let _ = handle.emit_to("main", WINDOW_EVENT, false);
+            let closed = WindowClosed {
+                key: key.clone(),
+                open: false,
+            };
+            let _ = handle.emit_to("main", WINDOW_EVENT, closed);
         }
     });
     Ok(())
 }
 
-/// Moves the YouTube window back over the reactor box, when it is open.
+/// Moves a reactor's YouTube window back over its box, when it is open.
 #[tauri::command]
-pub fn reactor_window_place(app: AppHandle, rect: BoxRect) -> CmdResult<bool> {
-    let Some(win) = app.get_webview_window(WINDOW) else {
+pub fn reactor_window_place(app: AppHandle, key: Option<String>, rect: BoxRect) -> CmdResult<bool> {
+    let Some(win) = find_window(&app, key.as_deref()) else {
         return Ok(false);
     };
     if let Some((x, y, w, h)) = window_place(&app, rect) {
@@ -473,15 +518,25 @@ pub fn reactor_window_place(app: AppHandle, rect: BoxRect) -> CmdResult<bool> {
     Ok(true)
 }
 
-/// Closes the YouTube window, when it is open.
+/// Closes a reactor's YouTube window, or without a key all of them.
 #[tauri::command]
-pub fn reactor_window_close(app: AppHandle) {
-    close_window(&app);
+pub fn reactor_window_close(app: AppHandle, key: Option<String>) {
+    match key {
+        Some(k) => {
+            if let Some(win) = find_window(&app, Some(&k)) {
+                let _ = win.destroy();
+            }
+        }
+        None => close_window(&app),
+    }
 }
 
+/// Closes every YouTube window.
 pub fn close_window(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window(WINDOW) {
-        let _ = win.destroy();
+    for (label, win) in app.webview_windows() {
+        if is_window(&label) {
+            let _ = win.destroy();
+        }
     }
 }
 
@@ -517,6 +572,16 @@ mod tests {
         assert!(!ok("https://youtube.com.example.com/"));
         assert!(!ok("javascript:alert(1)"));
         assert!(!ok("about:srcdoc"));
+    }
+
+    #[test]
+    fn a_window_for_each_reactor() {
+        assert_eq!(window_label(Some("r1abc")), "youtube-r1abc");
+        assert_eq!(window_label(Some("a b/../c")), "youtube-abc");
+        assert_eq!(window_label(Some("")), "youtube");
+        assert_eq!(window_label(None), "youtube");
+        assert!(is_window("youtube") && is_window("youtube-r1abc"));
+        assert!(!is_window("main") && !is_window("youtubex"));
     }
 
     fn video(id: &str) -> Option<YtTarget> {

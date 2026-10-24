@@ -1,13 +1,16 @@
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
+import { Icon } from "../components/Icon";
 import { AddReactor } from "./AddReactor";
-import { MAX_DELAY, type OverlaySide, type OverlaySize } from "./link";
+import { MAX_DELAY, MAX_REACTORS, viewOf, type OverlaySide, type OverlaySize } from "./link";
 import { useReactors } from "./useReactors";
 
 interface Props {
-  active: string | null;
-  onPick: (id: string | null) => void;
+  /** The reactors shown, in order. */
+  active: string[];
+  onToggle: (id: string) => void;
+  onHideAll: () => void;
   onClose: () => void;
-  /** Live TV can be held back to line up with the reactor. */
+  /** Live TV can be held back to line up with the reactors. */
   canDelay: boolean;
 }
 
@@ -19,11 +22,12 @@ const SIZES: { id: OverlaySize; label: string }[] = [
 const SIDES: { id: OverlaySide; label: string }[] = [
   { id: "left", label: "Left" },
   { id: "right", label: "Right" },
+  { id: "both", label: "Both" },
 ];
 
-/** Reactor picker and overlay settings, anchored above the player controls. */
-export function ReactorMenu({ active, onPick, onClose, canDelay }: Props) {
-  const { reactors, overlay, setOverlay } = useReactors();
+/** Reactor picker, each shown reactor's sound and the layout, anchored above the player controls. */
+export function ReactorMenu({ active, onToggle, onHideAll, onClose, canDelay }: Props) {
+  const { reactors, overlay, setOverlay, setView, setPreset } = useReactors();
   const ref = useRef<HTMLDivElement>(null);
 
   const close = useRef(onClose);
@@ -59,30 +63,51 @@ export function ReactorMenu({ active, onPick, onClose, canDelay }: Props) {
   };
 
   const delay = overlay.delay;
-  // A box that was moved or resized by hand shows no preset; picking one puts it back.
-  const preset = !overlay.box;
+  const full = active.length >= MAX_REACTORS;
+  // Boxes moved or resized by hand show no preset; picking one puts them all back.
+  const preset = !overlay.box && active.every((id) => !overlay.views[id]?.box);
   return (
     <div className="trackmenu reactmenu" ref={ref} role="menu" onKeyDown={onKey} data-nav="self">
-      <b>Reactor</b>
-      <button type="button" role="menuitemradio" aria-checked={!active} className={!active ? "opt sel" : "opt"} onClick={() => onPick(null)}>
+      <b>Reactors</b>
+      <button type="button" role="menuitemradio" aria-checked={!active.length} className={!active.length ? "opt sel" : "opt"} onClick={onHideAll}>
         Off
       </button>
-      {reactors.map((r) => (
-        <button type="button" key={r.id} role="menuitemradio" aria-checked={r.id === active} className={r.id === active ? "opt sel" : "opt"} onClick={() => onPick(r.id)}>
-          <span className="ellipsis" title={r.name}>
-            {r.name}
-          </span>
-          <span>{r.kind === "channel" ? "Channel" : "Video"}</span>
-        </button>
-      ))}
-      <AddReactor onAdded={(r) => onPick(r.id)} />
+      {reactors.map((r) => {
+        const on = active.includes(r.id);
+        const view = viewOf(overlay, r.id);
+        const silent = view.muted || view.volume === 0;
+        return (
+          <Fragment key={r.id}>
+            <button type="button" role="menuitemcheckbox" aria-checked={on} className={on ? "opt sel" : "opt"} disabled={!on && full} onClick={() => onToggle(r.id)}>
+              <span className="ellipsis" title={r.name}>
+                {r.name}
+              </span>
+              <span>{r.kind === "channel" ? "Channel" : "Video"}</span>
+            </button>
+            {on ? (
+              <div className="react-row react-sound">
+                <button type="button" className="react-mute" aria-label={view.muted ? `Unmute ${r.name}` : `Mute ${r.name}`} aria-pressed={view.muted} onClick={() => void setView(r.id, { muted: !view.muted })}>
+                  <Icon name={silent ? "mute" : "volume"} />
+                </button>
+                <input type="range" min={0} max={100} step={5} value={view.volume} aria-label={`${r.name} volume`} onChange={(e) => void setView(r.id, { volume: Number(e.target.value), muted: false })} />
+                <span className="num react-val">{view.muted ? 0 : view.volume}</span>
+              </div>
+            ) : null}
+          </Fragment>
+        );
+      })}
+      <AddReactor
+        onAdded={(r) => {
+          if (!active.includes(r.id) && !full) onToggle(r.id);
+        }}
+      />
 
-      <b>Overlay</b>
+      <b>Layout</b>
       <div className="react-row">
         <span>Size</span>
         <div className="seg" role="radiogroup" aria-label="Reactor size">
           {SIZES.map((s) => (
-            <button type="button" key={s.id} role="radio" aria-checked={preset && overlay.size === s.id} className={preset && overlay.size === s.id ? "on" : ""} onClick={() => void setOverlay({ size: s.id, box: null })}>
+            <button type="button" key={s.id} role="radio" aria-checked={preset && overlay.size === s.id} className={preset && overlay.size === s.id ? "on" : ""} onClick={() => void setPreset({ size: s.id })}>
               {s.label}
             </button>
           ))}
@@ -92,16 +117,11 @@ export function ReactorMenu({ active, onPick, onClose, canDelay }: Props) {
         <span>Side</span>
         <div className="seg" role="radiogroup" aria-label="Reactor side">
           {SIDES.map((s) => (
-            <button type="button" key={s.id} role="radio" aria-checked={preset && overlay.side === s.id} className={preset && overlay.side === s.id ? "on" : ""} onClick={() => void setOverlay({ side: s.id, box: null })}>
+            <button type="button" key={s.id} role="radio" aria-checked={preset && overlay.side === s.id} className={preset && overlay.side === s.id ? "on" : ""} onClick={() => void setPreset({ side: s.id })}>
               {s.label}
             </button>
           ))}
         </div>
-      </div>
-      <div className="react-row">
-        <span>Volume</span>
-        <input type="range" min={0} max={100} step={5} value={overlay.volume} aria-label="Reactor volume" onChange={(e) => void setOverlay({ volume: Number(e.target.value) })} />
-        <span className="num react-val">{overlay.volume}</span>
       </div>
       {canDelay ? (
         <div className="react-row">
