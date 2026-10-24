@@ -5,10 +5,11 @@ import { ContextMenu, type MenuState } from "../components/ContextMenu";
 import { Empty } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { Logo } from "../components/Logo";
+import { Progress } from "../components/Progress";
 import { Skeleton } from "../components/Skeleton";
 import { chunksFor, floorTo, layoutRow, mergeProgrammes, programmeAt, revealX, rulerTicks, timeAt, totalWidth, xAt, type GuideScale } from "../lib/guideLayout";
 import { shortSportsName, sportsFirst } from "../lib/sports";
-import { clock, dayLabel, DAY, HOUR, MINUTE, timeRange } from "../lib/time";
+import { clock, dayLabel, DAY, HOUR, MINUTE, progressOf, timeRange } from "../lib/time";
 import { clampIndex, computeWindow } from "../lib/virtual";
 import { StreamView } from "../player/StreamView";
 import { useApp } from "../state/app";
@@ -396,6 +397,7 @@ export function Guide({ initialChip }: { initialChip?: string }) {
                 {selChannel.name}
                 {info ? ` · ${timeRange(info.start, info.stop)}` : ""}
               </p>
+              {info && isLive(info) ? <Progress value={progressOf(info.start, info.stop, now)} className="guide-info-bar" /> : null}
               {info?.description ? <p className="desc">{info.description}</p> : null}
               <div className="tags">
                 {info?.category ? <span className="pill">{info.category}</span> : null}
