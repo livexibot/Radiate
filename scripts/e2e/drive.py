@@ -716,25 +716,34 @@ class Run:
             r.ok((fmt == "ts") == (started["kind"] == "mpegts"), f"liveFormat {fmt}: play_start kind {started['kind']}")  # type: ignore[index]
             time.sleep(0.5)
         self.s.invoke("prefs_set", {"patch": {"liveFormat": "ts", "latency": "normal"}})
-        # The live screen with its preview, then the full player on the first channel (real-time MPEG-TS)
-        self.go("live")
-        self.s.wait("live list", lambda: self.s.exists(xp_text("*", chans[0]["name"])), timeout=20)
-        self.s.wait("preview", lambda: (x := self.s.video()) and x["rs"] >= 2 and x["t"] > 0.5, timeout=30)
-        ours, prov, peak = self.in_use()
-        r.ok(ours == 1 and prov == 1, f"live screen preview plays: app {ours}, provider {prov}")
+        # Browsing Live TV and the Guide plays nothing: no previews, so no provider connection
         st0 = provider_stats(self.args.port)
         opened_before = sum(1 for q in st0["requests"] if q["path"].startswith("/live/"))
-        # preview -> full player with Watch: the same session carries on
+        self.go("live")
+        self.s.wait("live list", lambda: self.s.exists(xp_text("*", chans[0]["name"])), timeout=20)
+        self.s.key("ArrowDown")
+        time.sleep(2.5)
+        ours, prov, peak = self.in_use()
+        videos = self.s.js("return document.querySelectorAll('video').length")
+        r.ok(ours == 0 and prov == 0 and videos == 0 and self.s.exists("//button[contains(@class,'still')]"),
+             f"Live TV shows the channel's tile, not a preview: app {ours}, provider {prov}, {videos} video elements")
+        self.go("guide")
+        self.s.wait("guide", lambda: self.s.exists("//*[contains(@class,'guide-still')]"), timeout=20)
+        time.sleep(2.5)
+        ours, prov, peak = self.in_use()
+        videos = self.s.js("return document.querySelectorAll('video').length")
+        st1 = provider_stats(self.args.port)
+        opened_after = sum(1 for q in st1["requests"] if q["path"].startswith("/live/"))
+        r.ok(ours == 0 and prov == 0 and videos == 0 and opened_after == opened_before,
+             f"the Guide plays nothing either: app {ours}, provider {prov}, {videos} video elements, {opened_after - opened_before} stream requests")
+        # Watch opens the channel: one connection, in the full player
+        self.go("live")
+        self.s.wait("live list", lambda: self.s.exists(xp_text("button", "Watch")), timeout=20)
         t0 = time.time()
         self.s.click(xp_text("button", "Watch"))
         v = self.s.wait("live playing", lambda: (x := self.s.video()) and x["rs"] >= 2 and x["t"] > 2 and x and self.s.exists("//*[contains(@class,'player')]") and x, timeout=40)
-        st1 = provider_stats(self.args.port)
-        opened_after = sum(1 for q in st1["requests"] if q["path"].startswith("/live/"))
         ours, prov, peak = self.in_use()
-        # The full player's own video element reads the same relay session again: the upstream is
-        # asked again once, after the preview's read was closed (one connection at a time).
-        r.ok(ours == 1 and prov == 1 and st1["peak"] <= st0["peak"] + 0 and not st1["refused"],
-             f"Watch moves the preview into the full player in the same session (app {ours}, provider {prov}, upstream re-requested {opened_after - opened_before}x, peak {st1['peak']})")
+        r.ok(ours == 1 and prov == 1 and not provider_stats(self.args.port)["refused"], f"Watch opens the channel with one connection (app {ours}, provider {prov})")
         r.ok(True, f"live MPEG-TS plays (currentTime {v['t']})")
         waited = round(time.time() - t0, 1)
         ahead0 = round(v["buffered"][-1][1] - v["t"], 2) if v.get("buffered") else 0
@@ -795,8 +804,16 @@ class Run:
         chans = self.s.invoke("channels_list", {"query": {"favoritesOnly": False, "includeHidden": False, "offset": 0, "limit": 5}})["items"]  # type: ignore[index]
 
         def behind() -> float | None:
-            v = self.s.js("const n = document.querySelector('input.seek.live'); return n ? -Number(n.value) : null;")
+            v = self.s.js("const n = document.querySelector('input.seek.live'); return n ? Number(n.dataset.behind) : null;")
             return None if v is None else float(v)  # type: ignore[arg-type]
+
+        def bar() -> dict | None:
+            return self.s.js(  # type: ignore[return-value]
+                "const n = document.querySelector('input.seek.live'); if (!n) return null; const st = getComputedStyle(n);"
+                "const t = document.querySelector('.to-live');"
+                "return {value: Number(n.value), a: parseFloat(st.getPropertyValue('--a')), b: parseFloat(st.getPropertyValue('--b')), l: parseFloat(st.getPropertyValue('--l')),"
+                " toLive: t ? t.textContent : null};"
+            )
 
         def ahead() -> float:
             x = self.s.video() or {}
@@ -816,15 +833,20 @@ class Run:
             else:
                 r.ok(first >= 9.5 or abs(v["rate"] - 0.95) < 0.01, f"ts: starts with {first} s ahead and builds up at {v['rate']}x")
             self.s.wait("live bar", lambda: behind() is not None, timeout=10)
+            b0 = bar() or {}
+            r.ok(b0.get("value") == 500 and (b0.get("b") or 0) > 50 and b0.get("toLive"),
+                 f"{fmt}: the bar has the picture in the middle, the buffer ahead to its right ({b0.get('b')}%), and seconds to live ({b0.get('toLive')})")
             time.sleep(26)
             base = ahead()
             v0 = self.s.video() or {}
             span = v0["buffered"][-1][1] - v0["buffered"][0][0] if v0.get("buffered") else 0
             r.ok(span >= 24, f"{fmt}: {round(span)} s of live TV kept to go back to")
-            self.s.set_range("input.seek.live", -15)
+            self.s.set_range("input.seek.live", 475)  # 15 s of the 5 minutes on the left half
             got = self.s.wait("moved back", lambda: (b := behind()) is not None and b >= 12 and b, timeout=5)
             time.sleep(1)
-            r.ok(12 <= got <= 18 and abs(ahead() - base - 15) <= 3 and "Go live" in self.s.text(),
+            # HLS's buffered end moves a segment at a time, so it is a little looser there
+            slack = 4 if fmt == "hls" else 3
+            r.ok(12 <= got <= 18 and abs(ahead() - base - 15) <= slack and "Go live" in self.s.text(),
                  f"{fmt}: dragging the bar back 15 s plays from 15 s ago ({got} s behind, {ahead()} s buffered ahead, was {base}); Go live offered")
             samples = []
             for _ in range(7):
@@ -841,7 +863,9 @@ class Run:
             self.s.key("ArrowRight")
             b = self.s.wait("forward", lambda: (x := behind()) is not None and x <= 8 and x, timeout=5)
             r.ok(2 <= b <= 8, f"{fmt}: Right twice goes 20 s forward ({b} s behind)")
-            self.s.set_range("input.seek.live", 0)
+            bk = bar() or {}
+            r.ok(bk.get("value") == 500 and (bk.get("b") or 0) > 50, f"{fmt}: behind live the picture is in the middle again ({bk})")
+            self.s.set_range("input.seek.live", 1000)
             time.sleep(0.6)  # the bar moves the picture once a drag settles
             self.s.wait("live again", lambda: (x := behind()) is not None and x < 1.5 and "Go live" not in self.s.text(), timeout=5)
             r.ok(True, f"{fmt}: dragging to the end is live again")
@@ -862,8 +886,10 @@ class Run:
             self.s.click(xp_text("button", "Go live"))
             self.s.wait("go live", lambda: (x := behind()) is not None and x < 1.5 and x >= 0 and "Go live" not in self.s.text(), timeout=5)
             time.sleep(3)
-            # live keeps 10-12 s buffered ahead (the start buffer, then the follow target)
-            r.ok(ahead() < max(base, 12) + 2 and (behind() or 0) < 1.5, f"{fmt}: Go live jumps to the edge ({ahead()} s ahead, {base} s when it started)")
+            # live keeps 10-12 s buffered ahead on MPEG-TS (the start buffer, then the follow
+            # target), 10 s and two segments on HLS
+            cushion = 14 if fmt == "hls" else 12
+            r.ok(ahead() < max(base, cushion) + 2 and (behind() or 0) < 1.5, f"{fmt}: Go live jumps to the edge ({ahead()} s ahead, {base} s when it started)")
             self.leave_player()
         ours, prov, peak = self.in_use()
         st = provider_stats(self.args.port)
@@ -1036,7 +1062,6 @@ class Run:
             x = self.s.video() or {}
             return round(x["buffered"][-1][1] - x["t"], 2) if x.get("buffered") else 0.0
 
-        base_ahead = ahead()
         self.s.key("r")
         b = self.s.wait("reactor box", lambda: (x := box()) and x["src"] and x, timeout=15)
         r.ok(b["src"].startswith("http://127.0.0.1:") and f"/yt?v={video_id}" in b["src"], f"R shows the reactor box with the relay's page: {b['src']}")
@@ -1117,27 +1142,39 @@ class Run:
         r.ok(saved.get("size") == "l" and saved.get("side") == "right" and saved.get("box") is None and not (saved.get("views") or {}).get("rtest", {}).get("box"),
              f"overlay settings saved, and a preset puts the box back: {saved}")
 
-        # hold the match back 5 s
+        # delay the match 5 s: it goes back through what was buffered, without holding
+        before = ahead()
+        held_seen = []
+        # what can be gone back through: the buffered stretch the picture is in, up to its start
+        past = self.s.js("const v = document.querySelector('video'), b = v.buffered; let s = null;"
+                         "for (let i = b.length - 1; i >= 0; i--) { if (s === null) { if (b.start(i) <= v.currentTime + 0.5) s = b.start(i); }"
+                         " else if (b.end(i) >= s - 3) s = b.start(i); else break; }"
+                         "return s === null ? 0 : +(v.currentTime - s).toFixed(2);")
+        self.s.js("window.__ev = []; const v = document.querySelector('video');"
+                  "for (const e of ['pause', 'play', 'seeking', 'waiting']) v.addEventListener(e, () => window.__ev.push(e));")
         self.s.click("//*[contains(@class,'reactmenu')]//button[@aria-label='Five seconds more delay']")
-        self.s.wait("hold badge", lambda: "Holding the match" in self.s.text(), timeout=20)
-        v = self.s.video() or {}
-        r.ok(bool(v.get("paused")), f"the picture holds while the delay builds ({v.get('t')})")
-        t0 = time.time()
-        self.s.wait("plays again", lambda: (x := self.s.video()) and not x["paused"] and "Holding the match" not in self.s.text() and x, timeout=20)
-        held = round(time.time() - t0, 1)
-        time.sleep(3)
+        for _ in range(6):
+            time.sleep(0.5)
+            held_seen.append("Holding the match" in self.s.text())
         lag = ahead()
+        ev = self.s.js("return window.__ev")
+        if past >= 6:
+            r.ok(not any(held_seen) and "pause" not in ev and lag - before >= 4, f"the delay goes back 5 s at once, no hold: {before} -> {lag} s ahead ({past} s behind the picture; events {ev})")
+        else:
+            r.ok(lag - before >= 4, f"only {past} s behind the picture to go back through, the rest is held: {before} -> {lag} s ahead (events {ev})")
+        time.sleep(1)
         samples = []
         for _ in range(6):
             samples.append((self.s.video() or {}).get("t"))
             time.sleep(1)
         steps = [round(b2 - a, 2) for a, b2 in zip(samples, samples[1:]) if a is not None and b2 is not None]
-        r.ok(lag - base_ahead >= 4, f"after the hold the picture stays about 5 s behind: {lag} s buffered ahead (was {base_ahead}); waited {held} s more")
+        lag2 = ahead()
+        r.ok(abs(lag2 - lag) <= 1.5, f"and stays 5 s back: {lag2} s ahead")
         r.ok(all(0.8 <= x <= 1.2 for x in steps), f"and plays at normal speed, no catching up: steps {steps}")
         ours, prov, peak = self.in_use()
         r.ok(ours == 1 and prov == 1, f"still one connection: app {ours}, provider {prov}")
 
-        # zapping keeps the delay: the new channel is held too
+        # zapping keeps the delay: a new MPEG-TS channel has nothing older, so it is held
         self.s.key("Escape")  # close the menu
         time.sleep(0.5)
         self.s.key("ArrowDown")
@@ -1145,7 +1182,21 @@ class Run:
         self.s.wait("plays after zap", lambda: (x := self.s.video()) and not x["paused"] and x["t"] > 0.5 and "Holding the match" not in self.s.text() and x, timeout=30)
         time.sleep(2)
         held_ahead = ahead()
-        r.ok(held_ahead >= 4, f"after a zap the new channel is held back too ({held_ahead} s ahead)")
+        r.ok(held_ahead >= 4, f"after a zap the new MPEG-TS channel is held back too ({held_ahead} s ahead)")
+        # an HLS channel starts that much further back instead: no hold
+        self.s.invoke("prefs_set", {"patch": {"liveFormat": "hls"}})
+        self.s.key("ArrowDown")
+        seen = []
+        t0 = time.time()
+        while time.time() - t0 < 20:
+            seen.append("Holding the match" in self.s.text())
+            x = self.s.video() or {}
+            if x.get("t", 0) > 2 and not x.get("paused"):
+                break
+            time.sleep(0.5)
+        time.sleep(2)
+        held_ahead = ahead()
+        r.ok(not any(seen) and held_ahead >= 13, f"an HLS channel opens 10 s + the 5 s delay behind live, no hold ({held_ahead} s ahead)")
 
         # R turns it off and the match goes back to live
         self.s.key("r")
@@ -1154,6 +1205,7 @@ class Run:
         time.sleep(3)
         # the 5 s hold is dropped (live itself keeps up to 12 s buffered)
         r.ok(ahead() <= held_ahead - 3, f"R hides the reactor and the match is live again ({ahead()} s ahead, {held_ahead} while held)")
+        self.s.invoke("prefs_set", {"patch": {"liveFormat": "ts"}})
 
         # adding by link: a handle needs YouTube; a video link works without it
         self.s.click("//button[contains(@class,'cb')][contains(.,'Reactor')]")

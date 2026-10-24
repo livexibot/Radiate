@@ -109,9 +109,8 @@ export interface LiveFollow {
 /** Slow enough not to notice (the sound keeps its pitch): 10 s builds up in a little over 3 minutes. */
 export const BUILD_RATE = 0.95;
 
-/** `build`: false for previews, which play at normal speed whatever they have. */
-export function liveFollow(latency: LatencyPref, build = true): LiveFollow {
-  const buildBelow = build ? startBufferSecs(latency) : 0;
+export function liveFollow(latency: LatencyPref): LiveFollow {
+  const buildBelow = startBufferSecs(latency);
   switch (latency) {
     case "low":
       return { maxLatency: 2, targetLatency: 1.2, rate: 1.15, jumpAbove: 5, keep: 1.5, buildBelow, buildRate: 1 };
@@ -134,8 +133,9 @@ export function followStep(latency: number, rate: number, f: LiveFollow): { rate
 }
 
 /**
- * hls.js settings while watching live TV from behind: never catch up (no faster playback, no
- * jumps), and keep loading up to the edge so nothing slides out of the playlist before it plays.
+ * hls.js settings while watching live TV from behind, or held back to line up with a reactor:
+ * never catch up (no faster playback, no jumps), and keep loading up to the edge so nothing
+ * slides out of the playlist before it plays.
  */
 export const HLS_BEHIND = {
   maxLiveSyncPlaybackRate: 1,
@@ -144,15 +144,3 @@ export const HLS_BEHIND = {
   maxBufferLength: REWIND_SECS + 30,
   maxMaxBufferLength: REWIND_SECS + 30,
 } as const;
-
-/**
- * Settings while the match is held back to line up with a reactor: never catch up (no faster
- * playback, no jumps), and let hls.js keep the whole delay buffered ahead. MPEG-TS stops
- * following the edge too (see VideoSurface).
- */
-export function holdConfig(cfg: Record<string, unknown>, player: "hls" | "mpegts"): Record<string, unknown> {
-  if (player === "mpegts") return { ...cfg, liveSync: false, liveBufferLatencyChasing: false };
-  // hls.js refuses a mix of the seconds and segment-count settings.
-  const never = cfg.liveSyncDuration !== undefined ? { liveMaxLatencyDuration: Infinity } : { liveMaxLatencyDurationCount: Infinity };
-  return { ...cfg, ...never, lowLatencyMode: false, maxLiveSyncPlaybackRate: 1, maxBufferLength: 90, maxMaxBufferLength: 120 };
-}

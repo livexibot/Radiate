@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Channel, type Group } from "../api";
 import { ContextMenu, type MenuState } from "../components/ContextMenu";
+import { ChannelStill } from "../components/ChannelStill";
 import { Empty } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { Logo } from "../components/Logo";
@@ -9,7 +10,6 @@ import { Skeleton } from "../components/Skeleton";
 import { VirtualList } from "../components/VirtualList";
 import { shortSportsName, sportsFirst } from "../lib/sports";
 import { clock, progressOf, timeRange } from "../lib/time";
-import { StreamView } from "../player/StreamView";
 import { useApp, type Route } from "../state/app";
 import { useChannelActions } from "../state/channelActions";
 import { useDebounced, useGroups, useLoad, useNow, useNowNext, usePagedChannels, useSportsOverrides } from "../state/hooks";
@@ -81,7 +81,6 @@ export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
   const nn = useNowNext(visibleIds);
 
   const current = list.get(focused) ?? null;
-  const previewId = useDebounced(current?.id ?? null, 650);
 
   const ctx = everywhere ? { groupId: null, favoritesOnly: false } : { groupId: sel.favorites ? null : sel.groupId, favoritesOnly: sel.favorites };
   const play = (c: Channel) => navigate({ name: "player", target: { type: "channel", id: c.id }, ctx });
@@ -233,7 +232,7 @@ export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
         </div>
 
         <aside className="live-side">
-          <StreamView target={previewId ? { type: "channel", id: previewId } : null} backdrop={current?.name} className="preview" compact />
+          <ChannelStill channel={current} onPlay={() => current && play(current)} className="live-still" />
           {current ? (
             <div className="live-info">
               <div className="live-info-head">

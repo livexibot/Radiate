@@ -3,7 +3,7 @@ import type Hls from "hls.js";
 import type { LatencyPref, PlayStarted } from "../api";
 import { MatchDelay } from "../reactor/delay";
 import { convertInfoUrl, convertSrc, firstStage, type ConvertStage } from "./convert";
-import { followStep, HLS_BEHIND, hlsConfig, hlsLive, hlsSegmentSecs, holdConfig, liveFollow, mpegtsConfig, rebufferSecs } from "./latency";
+import { followStep, HLS_BEHIND, hlsConfig, hlsLive, hlsSegmentSecs, liveFollow, mpegtsConfig, rebufferSecs } from "./latency";
 import { gapJump, LIVE_SLACK, liveWindow, playableSpan, rewindTarget, type LiveWindow } from "./timeshift";
 import { resumePosition, STALL_SECS, stallStep } from "./vodLogic";
 
@@ -80,8 +80,6 @@ interface Props {
   rewind?: boolean;
   /** Live: where the picture is against live, every second and after each move. */
   onLive?: (w: LiveWindow | null) => void;
-  /** Live: wait for a buffer before starting (see latency.ts). Previews start at once. */
-  startBuffer?: boolean;
 }
 const UNSUPPORTED: FatalInfo = { message: "This stream's format couldn't be played.", decode: true };
 
@@ -94,7 +92,7 @@ type MpegtsPlayer = {
   on(event: string, cb: (...args: unknown[]) => void): void;
 };
 
-export function VideoSurface({ stream, volume, muted, className, onTracks, onStats, onFatal, onAutoplayBlocked, controlRef, onTime, startFraction, live = true, latency = "normal", onPlayState, onEnded, delay = 0, onHold, rewind = false, onLive, startBuffer = true }: Props) {
+export function VideoSurface({ stream, volume, muted, className, onTracks, onStats, onFatal, onAutoplayBlocked, controlRef, onTime, startFraction, live = true, latency = "normal", onPlayState, onEnded, delay = 0, onHold, rewind = false, onLive }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const cb = useRef({ onTracks, onStats, onFatal, onAutoplayBlocked, onTime, onPlayState, onEnded, onHold, onLive });
   cb.current = { onTracks, onStats, onFatal, onAutoplayBlocked, onTime, onPlayState, onEnded, onHold, onLive };
@@ -106,18 +104,14 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
   latencyRef.current = latency;
   const rewindRef = useRef(rewind);
   rewindRef.current = rewind;
-  const bufferRef = useRef(startBuffer);
-  bufferRef.current = startBuffer;
   const [hasFrame, setHasFrame] = useState(false);
   // After the built-in player gives up on a format, the converted stream (see convert.ts).
   const [converted, setConverted] = useState<{ session: string; stage: ConvertStage } | null>(null);
   const stageNow = converted?.session === stream.sessionId ? converted.stage : 0;
-  // Holding back changes how the players catch up, so they are set up again when it turns on or off.
-  const holding = live && delay > 0;
   const delayRef = useRef(delay);
   delayRef.current = live ? delay : 0;
-  // The running stream's delay, once its first picture is up.
-  const matchDelay = useRef<{ d: MatchDelay; started: boolean } | null>(null);
+  // The running stream's delay, once its first picture is up; `changed` tells the players.
+  const matchDelay = useRef<{ d: MatchDelay; started: boolean; changed: () => void } | null>(null);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -183,14 +177,22 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
       unsupported(true);
       return true;
     };
-    const holdBack = isLive ? { d: new MatchDelay(video, (left) => !disposed && cb.current.onHold?.(left)), started: false } : null;
+    // The furthest back the picture can go now: what is buffered, and for HLS the playlist's
+    // older segments too (less one, which may slide out before it loads).
+    const earliest = () => {
+      const span = playableSpan(video.buffered, video.currentTime);
+      let at = span ? span.start : video.currentTime;
+      const d = hls?.latestLevelDetails;
+      if (d?.live && d.fragments.length) at = Math.min(at, d.fragmentStart + hlsSegmentSecs(d.targetduration));
+      return at;
+    };
+    const holdBack = isLive ? { d: new MatchDelay(video, (left) => !disposed && cb.current.onHold?.(left), earliest), started: false, changed: () => calm() } : null;
     matchDelay.current = holdBack;
-    const hold = isLive && delayRef.current > 0;
 
-    // Live TV keeps the last few minutes. Watching from behind (rewound or paused) stops all
-    // catching up until "Go live"; MPEG-TS is kept near the edge here, HLS by hls.js itself.
-    const pace = liveFollow(latencyRef.current, bufferRef.current);
-    const follow = isLive && kind === "mpegts" && !hold ? pace : null;
+    // Live TV keeps the last few minutes. Watching from behind (rewound or paused) or held back
+    // for a reactor stops all catching up; MPEG-TS is kept near the edge here, HLS by hls.js itself.
+    const pace = liveFollow(latencyRef.current);
+    const follow = isLive && kind === "mpegts" ? pace : null;
     // Live TV that ran out of stream builds a few seconds back up before playing on (see
     // latency.ts). While it gathers, the picture is paused without counting as paused.
     let gathering = false;
@@ -228,9 +230,24 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
     };
     let behindLive = false;
     let liveTicks = 0;
+    // hls.js's own catching-up settings, kept aside while it plays behind live (HLS_BEHIND).
     let hlsSaved: Record<string, unknown> | null = null;
-    // The live playlist's segment length, once loaded.
+    const calm = () => {
+      if (!hls) return;
+      const c = hls.config as unknown as Record<string, unknown>;
+      const behind = behindLive || delayRef.current > 0;
+      if (behind && !hlsSaved) {
+        hlsSaved = Object.fromEntries(Object.keys(HLS_BEHIND).map((k) => [k, c[k]]));
+        Object.assign(c, HLS_BEHIND);
+      } else if (!behind && hlsSaved) {
+        Object.assign(c, hlsSaved);
+        hlsSaved = null;
+      }
+    };
+    // The live playlist's segment length, once loaded, and how far behind its edge following
+    // live plays (see fitSegments).
     let hlsSegment: number | null = null;
+    let hlsSync: number | null = null;
     // hls.js's live position stands still while a playlist reload is late and then jumps on.
     // Live moves one second per second, so keep the furthest it has been in the last 20 s.
     const edgeSeen: { at: number; off: number }[] = [];
@@ -251,7 +268,13 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
     const measure = (): LiveWindow | null => {
       if (!isLive) return null;
       const span = playableSpan(video.buffered, video.currentTime);
-      return span ? liveWindow(video.currentTime, liveAt(span), span.start) : null;
+      if (!span) return null;
+      // The newest part of the stream: MPEG-TS has it as it arrives; for HLS the playlist's last
+      // segment, moving on with the time since it loaded (not past two more, if a reload is late).
+      const d = hls?.latestLevelDetails;
+      const edgeAt = d?.live ? Math.max(span.end, d.edge + Math.min(d.age, 2 * hlsSegmentSecs(d.targetduration))) : span.end;
+      const cushion = (hls ? (hls.targetLatency ?? 0) : pace.targetLatency) + delayRef.current;
+      return liveWindow(video.currentTime, liveAt(span), span.start, { edgeAt, end: span.end, cushion });
     };
     // Following live counts as live, whatever the latency drifts to; only going back is behind.
     const windowNow = (): LiveWindow | null => {
@@ -265,17 +288,12 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
       if (behindLive) return;
       behindLive = true;
       video.playbackRate = 1;
-      if (hls && !hlsSaved) {
-        const c = hls.config as unknown as Record<string, unknown>;
-        hlsSaved = Object.fromEntries(Object.keys(HLS_BEHIND).map((k) => [k, c[k]]));
-        Object.assign(c, HLS_BEHIND);
-      }
+      calm();
     };
     const backToLive = () => {
       behindLive = false;
       liveTicks = 0;
-      if (hls && hlsSaved) Object.assign(hls.config as unknown as Record<string, unknown>, hlsSaved);
-      hlsSaved = null;
+      calm();
     };
     const goLive = () => {
       if (!isLive) return;
@@ -392,7 +410,7 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
       // of stuttering on the little that arrives. Not before the first picture: a channel plays
       // as soon as it can.
       if (!isLive || !hasStarted || gathering || video.paused || video.seeking || holdBack?.d.holding) return;
-      const need = bufferRef.current ? rebufferSecs(latencyRef.current) : 0;
+      const need = rebufferSecs(latencyRef.current);
       const span = playableSpan(video.buffered, video.currentTime);
       if (need <= 0 || (span && span.end - video.currentTime > 1)) return;
       gathering = true;
@@ -403,10 +421,19 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
       waiting = false;
       hasStarted = true;
       setHasFrame(true);
-      // The first picture is the live edge: build the delay from here.
+      // The delay counts from the first picture. HLS started that much further back already (see
+      // fitSegments): count what the playlist allowed, and follow live from where the buffer alone
+      // puts it. The rest, if any, is taken from what is there or held.
       if (holdBack && !holdBack.started) {
         holdBack.started = true;
-        holdBack.d.set(delayRef.current);
+        const want = delayRef.current;
+        if (hls && hlsSync !== null) {
+          (hls.config as unknown as Record<string, unknown>).liveSyncDuration = hlsSync;
+          const at = hls.liveSyncPosition;
+          const got = at === null ? 0 : Math.min(want, Math.max(0, at - video.currentTime));
+          holdBack.d.assume(want - got < 1 ? want : got);
+        }
+        holdBack.d.set(want);
       }
     };
     const onLoaded = () => {
@@ -443,7 +470,7 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
         return null;
       }
       const cfg = mpegtsConfig(isLive, rewindRef.current);
-      const p = mpegts.createPlayer({ type: "mpegts", isLive, url }, hold ? holdConfig(cfg, "mpegts") : cfg) as unknown as MpegtsPlayer;
+      const p = mpegts.createPlayer({ type: "mpegts", isLive, url }, cfg) as unknown as MpegtsPlayer;
       ts = p;
       p.on(mpegts.Events.MEDIA_INFO, (...args: unknown[]) => {
         const info = args[0] as { videoCodec?: string; fps?: number } | undefined;
@@ -523,9 +550,9 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
           } else unsupported();
           return;
         }
-        const cfg = hlsConfig(latencyRef.current, isLive, rewindRef.current);
-        const h = new HlsCtor(hold ? holdConfig(cfg, "hls") : cfg);
+        const h = new HlsCtor(hlsConfig(latencyRef.current, isLive, rewindRef.current));
         hls = h;
+        calm();
         // hls.js puts the picture back at live when it falls out of the playlist's window at the
         // wrong moment (a playlist reload while the picture is briefly short of data). Behind live
         // on purpose, it stays where the viewer put it.
@@ -536,17 +563,19 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
             if (!behindLive) sync.call(sc, d);
           };
         }
-        // Live starts the buffer's length behind the edge, which depends on the segment length:
-        // set that as each playlist arrives, before hls.js picks where to start from it.
+        // Live starts the buffer's length behind the edge, which depends on the segment length,
+        // and a reactor's delay further back, so the match needn't be held for it: set that as
+        // each playlist arrives, before hls.js picks where to start from it.
         const fitSegments = (d: { live: boolean; targetduration: number }) => {
           if (!d.live || d.targetduration === hlsSegment) return;
           hlsSegment = d.targetduration;
-          const tuned = hold || !bufferRef.current ? null : hlsLive(latencyRef.current, hlsSegment);
+          const tuned = hlsLive(latencyRef.current, hlsSegment);
           if (!tuned) return;
           const { liveSyncDuration, ...rest } = tuned;
           const c = h.config as unknown as Record<string, unknown>;
-          c.liveSyncDuration = liveSyncDuration;
-          // Behind live these come back on Go live.
+          hlsSync = liveSyncDuration;
+          c.liveSyncDuration = liveSyncDuration + (holdBack && !holdBack.started ? delayRef.current : 0);
+          // Behind live these come back after.
           Object.assign(hlsSaved ?? c, rest);
         };
         const trigger = h.trigger.bind(h);
@@ -622,6 +651,11 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
               return;
             }
             if (!follow || behindLive) return;
+            // Held back for a reactor: no building up or catching up either.
+            if (delayRef.current > 0) {
+              if (video.playbackRate !== 1) video.playbackRate = 1;
+              return;
+            }
             const span = playableSpan(video.buffered, video.currentTime);
             if (!span) return;
             tsAhead = Math.min(follow.targetLatency, span.end - video.currentTime);
@@ -715,12 +749,15 @@ export function VideoSurface({ stream, volume, muted, className, onTracks, onSta
       video.load();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stream.sessionId, stream.url, stream.kind, holding, stageNow]);
+  }, [stream.sessionId, stream.url, stream.kind, stageNow]);
 
-  // A new delay while playing: hold for the difference, or skip forward through the buffer.
+  // A new delay while playing: go back through what is there (or hold for what isn't), or skip
+  // forward through the buffer.
   useEffect(() => {
     const m = matchDelay.current;
-    if (m?.started) m.d.set(live ? delay : 0);
+    if (!m) return;
+    m.changed();
+    if (m.started) m.d.set(live ? delay : 0);
   }, [delay, live]);
 
   return <video ref={videoRef} className={`video${hasFrame ? " has-frame" : ""}${className ? ` ${className}` : ""}`} playsInline preload="auto" />;

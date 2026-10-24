@@ -7,7 +7,7 @@ Radiate is the watching companion to
 [Resonate](https://github.com/livexibot/Resonate): Resonate for listening,
 Radiate for watching.
 
-![Radiate's TV guide: a live preview above a real grid, with the now-line](docs/images/guide.png)
+![Radiate's TV guide: the selected programme above a real grid, with the now-line](docs/images/guide.png)
 
 **[Download Radiate](https://github.com/livexibot/Radiate/releases/latest)**:
 an installer for Windows (`.exe` or `.msi`), a `.dmg` for macOS, and an
@@ -21,17 +21,23 @@ AppImage, `.deb` or `.rpm` for Linux. Radiate updates itself after that.
 - **Watch with reactors.** Save YouTube reactors by link, then show up to
   four at once, each in a box beside the match: drag them anywhere, resize
   them to any shape by their corners and edges, and the match makes room.
-  Each box has its own volume and mute, and opens where you left it. If
-  the reactors are behind your feed, hold the match back a few seconds to
-  line them up. It's YouTube's own player; a video that doesn't allow
-  other apps opens on youtube.com in its own window instead.
-- **Rewind live TV.** Drag the progress bar back to see a goal again, up
-  to the last 5 minutes, then forward or straight back to live.
+  Each box has its own volume and mute, opens where you left it, and stays
+  on top of everything else. If the reactors are behind your feed, delay
+  the match a few seconds to line them up: it goes back through what has
+  already loaded instead of pausing. It's YouTube's own player; a video
+  that doesn't allow other apps opens on youtube.com in its own window
+  instead.
+- **Live TV that doesn't buffer.** A channel opens 10 s behind live, so a
+  slow moment at the provider never stops the picture. The progress bar
+  keeps the picture in the middle, shows the buffer built up ahead of it
+  and how many seconds behind live you are. Drag back to see a goal
+  again, up to the last 5 minutes, then forward or straight back to live.
 - **Your sources.** M3U and M3U8 playlists by link or file, Xtream Codes
   logins (live TV, movies and series), and XMLTV guides, gzipped or not.
   Or try it with free public channels by country.
-- **A real TV guide.** A grid with a live preview, a now-line and group
-  filters. Channels are matched to the guide by id, by name and by a fuzzy
+- **A real TV guide.** A grid with a now-line and group filters. Nothing
+  plays until you open a channel, so browsing never uses one of your
+  provider's connections. Channels are matched to the guide by id, by name and by a fuzzy
   score, and "Fix guide" lets you pick the match yourself; it's remembered.
 - **Picture fast.** Playlists of tens of thousands of channels are indexed
   locally in about a second, so lists and the guide never wait for the

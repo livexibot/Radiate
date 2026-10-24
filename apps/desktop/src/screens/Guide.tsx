@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { api, type Channel, type Programme } from "../api";
+import { ChannelStill } from "../components/ChannelStill";
 import { Chips } from "../components/Chips";
 import { ContextMenu, type MenuState } from "../components/ContextMenu";
 import { Empty } from "../components/Empty";
@@ -11,7 +12,6 @@ import { chunksFor, floorTo, layoutRow, mergeProgrammes, programmeAt, revealX, r
 import { shortSportsName, sportsFirst } from "../lib/sports";
 import { clock, dayLabel, DAY, HOUR, MINUTE, progressOf, timeRange } from "../lib/time";
 import { clampIndex, computeWindow } from "../lib/virtual";
-import { StreamView } from "../player/StreamView";
 import { useApp } from "../state/app";
 import { useChannelActions } from "../state/channelActions";
 import { mergeGroupsByName, useDebounced, useGroups, useLoad, useNow, usePagedChannels, useSportsOverrides } from "../state/hooks";
@@ -172,7 +172,6 @@ export function Guide({ initialChip }: { initialChip?: string }) {
     if (i >= 0) setSel((s) => ({ ...s, start: selProgs[i]!.start }));
   }, [selProgs, sel.start]);
 
-  const previewChannelId = useDebounced(selChannel?.id ?? null, 700);
   const isLive = (p: Programme | null) => !!p && p.start <= now && p.stop > now;
 
   const reveal = useCallback(
@@ -383,9 +382,7 @@ export function Guide({ initialChip }: { initialChip?: string }) {
     <div className="screen fill guide">
       <h1 className="sr-only">Guide</h1>
       <div className="guide-head">
-        <StreamView target={previewChannelId ? { type: "channel", id: previewChannelId } : null} backdrop={selChannel?.name} className="guide-preview" compact>
-          {selChannel ? <span className="preview-tag">{selChannel.number} · {selChannel.name}</span> : null}
-        </StreamView>
+        <ChannelStill channel={selChannel} onPlay={() => selChannel && play(selChannel)} className="guide-still" />
         <div className="guide-info">
           {selChannel ? (
             <>

@@ -1,7 +1,9 @@
 /**
  * Holds the match back so it lines up with a reactor who is behind the TV
- * feed. Raising the delay pauses the picture for the difference; lowering it
- * skips forward through what is already buffered.
+ * feed. Raising the delay goes back through what is already there (the
+ * buffered past, or an HLS playlist's older segments) and only pauses the
+ * picture for what that can't cover; lowering it skips forward through what
+ * is already buffered.
  */
 export interface DelayVideo {
   paused: boolean;
@@ -21,9 +23,13 @@ export class MatchDelay {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
 
-  constructor(video: DelayVideo, onHold: (secondsLeft: number | null) => void = () => undefined) {
+  private readonly earliest: () => number;
+
+  /** `earliest`: the furthest back the picture can go now, on the video's timeline. */
+  constructor(video: DelayVideo, onHold: (secondsLeft: number | null) => void = () => undefined, earliest?: () => number) {
     this.v = video;
     this.onHold = onHold;
+    this.earliest = earliest ?? (() => video.currentTime);
   }
 
   get holding(): boolean {
@@ -34,6 +40,11 @@ export class MatchDelay {
   set(seconds: number): void {
     this.target = Math.max(0, seconds);
     this.apply();
+  }
+
+  /** The picture already started this many seconds behind (a playlist started further back). */
+  assume(seconds: number): void {
+    this.applied = Math.max(0, seconds);
   }
 
   /** The stream started again at the live edge, so the delay has to be built up again. */
@@ -48,8 +59,20 @@ export class MatchDelay {
   }
 
   private apply(): void {
-    const diff = this.target - this.applied;
+    let diff = this.target - this.applied;
     if (diff > 0) {
+      // Back through what is there first; a hold only for the rest.
+      const room = Math.max(0, this.v.currentTime - this.earliest() - 0.5);
+      const back = Math.min(diff, room);
+      if (back >= 0.25) {
+        this.v.currentTime -= back;
+        this.applied += back;
+        diff -= back;
+      }
+      if (diff < 0.25) {
+        this.applied = this.target;
+        return;
+      }
       const now = Date.now();
       this.holdUntil = Math.max(now, this.holdUntil) + diff * 1000;
       this.applied = this.target;

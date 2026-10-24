@@ -258,9 +258,9 @@ Rules:
   no sharing a connection between two sessions, no retries that hold a
   second connection.
 - Providers are slow to notice a closed connection, so their count still
-  includes streams we closed a moment ago (zapping, preview to full screen,
-  an update restart). Sessions that reached the provider and closed within
-  the last 90 s are taken off its count. This only decides whether to ask
+  includes streams we closed a moment ago (zapping, an update restart).
+  Sessions that reached the provider and closed within the last 90 s are
+  taken off its count. This only decides whether to ask
   the provider: our own sessions never go over `limit`, and the provider
   still refuses a stream it has no room for.
   The shell saves them on quit (`recent-streams.json` in the data folder)

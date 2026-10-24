@@ -193,6 +193,43 @@ describe("match delay", () => {
     expect(v.currentTime).toBe(101);
   });
 
+  it("goes back through what is there instead of holding", () => {
+    const v = fakeVideo(() => 130);
+    const holds: (number | null)[] = [];
+    const d = new MatchDelay(v, (s) => holds.push(s), () => 40);
+    d.set(20);
+    expect(v.currentTime).toBe(80);
+    expect(v.paused).toBe(false);
+    expect(d.holding).toBe(false);
+    expect(holds).toEqual([]);
+    // Less delay: forward through the buffer again.
+    d.set(5);
+    expect(v.currentTime).toBe(95);
+  });
+
+  it("holds only for what isn't there", () => {
+    const v = fakeVideo(() => 130);
+    const d = new MatchDelay(v, () => undefined, () => 96.5);
+    d.set(10); // 3 s back (half a second short of the oldest), 7 s held
+    expect(v.currentTime).toBe(97);
+    expect(d.holding).toBe(true);
+    vi.advanceTimersByTime(6900);
+    expect(v.paused).toBe(true);
+    vi.advanceTimersByTime(200);
+    expect(v.paused).toBe(false);
+  });
+
+  it("counts a start further back as delay already there", () => {
+    const v = fakeVideo(() => 130);
+    const d = new MatchDelay(v);
+    d.assume(10);
+    d.set(10);
+    expect(v.paused).toBe(false);
+    expect(v.currentTime).toBe(100);
+    d.set(4);
+    expect(v.currentTime).toBe(106);
+  });
+
   it("builds the delay again after the stream restarts", () => {
     const v = fakeVideo(() => 130);
     const d = new MatchDelay(v);

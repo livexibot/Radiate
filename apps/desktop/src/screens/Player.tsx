@@ -14,7 +14,7 @@ import { NextEpisodeCard, useNextEpisode } from "../player/NextEpisode";
 import { episodeTitle, nextPhase, playerKeyAction, resumeFraction, seekTarget, shouldSaveProgress, type FocusKind } from "../player/vodLogic";
 import { StatsPill } from "../player/StatsPill";
 import { restart } from "../player/streams";
-import { LIVE_SLACK, type LiveWindow } from "../player/timeshift";
+import { LIVE_SLACK, sameLiveWindow, type LiveWindow } from "../player/timeshift";
 import { matchTrack, TrackMenu } from "../player/TrackMenu";
 import { useStream } from "../player/useStream";
 import { useZapList } from "../player/useZapList";
@@ -621,7 +621,7 @@ export function Player({ route }: { route: PlayerRoute }) {
             latency={prefs?.latency}
             delay={shown.length ? reactors.overlay.delay : 0}
             onHold={setHold}
-            onLive={(w) => setLiveWin((o) => (o && w && Math.round(o.behind) === Math.round(w.behind) && Math.round(o.reach) === Math.round(w.reach) ? o : w))}
+            onLive={(w) => setLiveWin((o) => (o && w && sameLiveWindow(o, w) ? o : w))}
             onPlayState={(p) => {
               setPaused(p);
               if (!p) setEnded(false);

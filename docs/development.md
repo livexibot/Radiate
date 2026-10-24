@@ -125,6 +125,35 @@ page.
   empty screen leads to Movies and Series. New shared values are tokens
   in `styles/base.css`.
 
+## Decisions (24 October 2026, 0.5.0)
+
+- Nothing plays until a channel is opened: Live TV and the Guide show the
+  channel's tile (`ChannelStill`) where a preview used to play, because
+  every preview took one of the provider's connections.
+- Reactor boxes are above everything else in the app: the player's bars
+  and menus, cards, toasts and dialogs. The bars no longer let the
+  pointer through to boxes under them; there are none.
+- Delaying the match goes back through what is there instead of holding
+  it: the 5 minutes kept for rewinding, and an HLS playlist's older
+  segments (`MatchDelay`'s `earliest`). Only what isn't there is held. A
+  channel opened with a delay starts that much further back on HLS
+  (`fitSegments` adds it to `liveSyncDuration` until the first picture).
+  Showing or hiding reactors no longer restarts the stream: hls.js
+  switches to `HLS_BEHIND` and MPEG-TS stops following the edge while a
+  delay is on. Live MPEG-TS has nothing older, so a new TS channel with
+  a delay is still held; the owner kept TS's instant start, building the
+  10 s up while playing, over waiting 10 s.
+- The live bar keeps the picture in the middle. The left half is the last
+  5 minutes (red where it can be played again); the right half runs to
+  live and is at least the cushion long, what following live keeps ahead
+  (12 s on MPEG-TS, 10 s plus two segments on HLS, plus a delay), with
+  the buffer ahead lighter, so a TS channel's buffer is seen building up.
+  Under the picture: how many seconds behind live it is, the time it
+  would take to catch up. The bar holds its layout while it is dragged,
+  then centres again (`liveBarLayout`, `liveBarBehind` in
+  `player/timeshift.ts`). Left and Right move 10 s, Page Up and Page Down
+  a minute, Home and End go to the oldest and to live.
+
 ## Layout
 
 ```

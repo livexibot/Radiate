@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Episode, SeriesInfo } from "../api";
-import { BUILD_RATE, followStep, HLS_BEHIND, hlsConfig, hlsLive, hlsSegmentSecs, holdConfig, latencyOf, liveFollow, mpegtsConfig, rebufferSecs, REWIND_SECS, startBufferSecs } from "../player/latency";
-import { gapJump, LIVE_SLACK, liveWindow, playableSpan, rewindTarget } from "../player/timeshift";
+import { BUILD_RATE, followStep, HLS_BEHIND, hlsConfig, hlsLive, hlsSegmentSecs, latencyOf, liveFollow, mpegtsConfig, rebufferSecs, REWIND_SECS, startBufferSecs } from "../player/latency";
+import { gapJump, LIVE_SLACK, liveBarBehind, liveBarLayout, liveWindow, playableSpan, rewindTarget } from "../player/timeshift";
 import {
   episodeLabel,
   nextEpisode,
@@ -171,8 +171,6 @@ describe("latency", () => {
       expect(counts && secs).toBe(false);
       if (secs) expect(c.liveMaxLatencyDuration as number).toBeGreaterThan(c.liveSyncDuration as number);
       else expect(c.liveMaxLatencyDurationCount as number).toBeGreaterThan(c.liveSyncDurationCount as number);
-      const held = holdConfig(c, "hls");
-      expect(held.liveSyncDuration !== undefined && held.liveMaxLatencyDurationCount !== undefined).toBe(false);
       const f = liveFollow(l);
       expect(f.targetLatency).toBeLessThan(f.maxLatency);
       // Following live never eats into the buffer a channel starts with.
@@ -213,9 +211,8 @@ describe("latency", () => {
     expect(followStep(startBufferSecs("normal") + 1, BUILD_RATE, f)).toEqual({ rate: BUILD_RATE, jump: false });
     expect(followStep(f.targetLatency, BUILD_RATE, f)).toEqual({ rate: 1, jump: false });
     expect(followStep(f.targetLatency + 1, 1, f)).toEqual({ rate: 1, jump: false });
-    // low latency and previews never slow down
+    // low latency never slows down
     expect(followStep(0.5, 1, liveFollow("low"))).toEqual({ rate: 1, jump: false });
-    expect(followStep(2, 1, liveFollow("normal", false))).toEqual({ rate: 1, jump: false });
   });
   it("keeps minutes of live TV to rewind", () => {
     expect(hlsConfig("normal", true, true).backBufferLength).toBe(REWIND_SECS);
@@ -245,10 +242,42 @@ describe("live rewind", () => {
   });
 
   it("measures how far behind live and how far back", () => {
-    expect(liveWindow(97, 97, 40)).toEqual({ behind: 0, reach: 57 });
-    expect(liveWindow(60, 97, 40)).toEqual({ behind: 37, reach: 57 });
+    expect(liveWindow(97, 97, 40)).toMatchObject({ behind: 0, reach: 57 });
+    expect(liveWindow(60, 97, 40)).toMatchObject({ behind: 37, reach: 57 });
     // Never more than what is kept.
-    expect(liveWindow(0, 1000, 0)).toEqual({ behind: REWIND_SECS, reach: REWIND_SECS });
+    expect(liveWindow(0, 1000, 0)).toMatchObject({ behind: REWIND_SECS, reach: REWIND_SECS });
+    // Following live 12 s behind the newest part, with 11 s of it buffered.
+    expect(liveWindow(88, 88, 40, { edgeAt: 100, end: 99, cushion: 12 })).toEqual({ behind: 0, reach: 48, edge: 12, ahead: 11, cushion: 12 });
+    // Buffered past the newest part known (hls.js's idea of the edge lags): no more than the edge.
+    expect(liveWindow(88, 88, 40, { edgeAt: 100, end: 104 }).ahead).toBe(12);
+  });
+
+  it("draws the live bar with the picture in the middle", () => {
+    // Following live: 5 min kept behind, 12 s of buffer ahead, all the way to live.
+    const live = liveWindow(400, 400, 100, { edgeAt: 412, end: 412, cushion: 12 });
+    let l = liveBarLayout(live);
+    expect(l.past).toBe(0);
+    expect(l.ahead).toBe(1);
+    expect(l.live).toBe(1);
+    // Just started on MPEG-TS: nothing behind, 3 s of the 12 built up so far.
+    const start = liveWindow(10, 10, 9.5, { edgeAt: 13, end: 13, cushion: 12 });
+    l = liveBarLayout(start);
+    expect(l.past).toBeCloseTo(0.5 - (0.5 / REWIND_SECS) * 0.5);
+    expect(l.ahead).toBeCloseTo(0.5 + (3 / 12) * 0.5);
+    expect(l.right).toBe(12);
+    // A minute back: the right half reaches live, a minute and the cushion away.
+    const back = liveWindow(340, 400, 100, { edgeAt: 412, end: 412, cushion: 12 });
+    l = liveBarLayout(back);
+    expect(l.right).toBe(72);
+    expect(l.past).toBeCloseTo(0.5 - (240 / REWIND_SECS) * 0.5);
+    // Points on the bar: the middle stays put, the left end is 5 min back, the right end live.
+    expect(liveBarBehind(0.5, back, l)).toBe(60);
+    expect(liveBarBehind(0, back, l)).toBe(back.reach);
+    expect(liveBarBehind(0.5 + (30 / 72) * 0.5, back, l)).toBeCloseTo(30);
+    expect(liveBarBehind(1, back, l)).toBe(0);
+    // Following live, the cushion ahead can't be skipped into.
+    expect(liveBarBehind(0.9, live, liveBarLayout(live))).toBe(0);
+    expect(liveBarBehind(0.5 - (15 / REWIND_SECS) * 0.5, live, liveBarLayout(live))).toBeCloseTo(15);
   });
 
   it("plays over a short hole in the stream", () => {
@@ -260,7 +289,7 @@ describe("live rewind", () => {
   });
 
   it("goes back only as far as is buffered, and near live means live", () => {
-    const w = { behind: 0, reach: 57 };
+    const w = { reach: 57 };
     expect(rewindTarget(30, w, 97)).toBe(67);
     expect(rewindTarget(120, w, 97)).toBe(40);
     expect(rewindTarget(1, w, 97)).toBeNull();

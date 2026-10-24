@@ -1,6 +1,6 @@
 // Owns play_start / play_stop. Every holder acquires a target and releases it; the session is
-// stopped shortly after the last holder lets go, so moving from a preview to the full player
-// reuses one connection instead of opening a second one.
+// stopped shortly after the last holder lets go, so moving between the full player and a
+// Multiview tile of the same channel reuses one connection instead of opening a second one.
 import { api, ApiError, isConnectionLimit, limitDetails, type PlayStarted, type PlayTarget } from "../api";
 
 interface Entry {

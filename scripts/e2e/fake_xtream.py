@@ -114,7 +114,7 @@ def reported_count() -> int:
 
 
 # ---------------------------------------------------------------------------
-# Live HLS: one ffmpeg writes a sliding window for every HLS viewer.
+# Live HLS: one ffmpeg writes a 30 s sliding window (2 s segments) for every HLS viewer.
 
 
 def start_live_hls() -> str:
@@ -124,7 +124,7 @@ def start_live_hls() -> str:
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-re", "-stream_loop", "-1",
         "-i", os.path.join(ARGS.media, "live_a.ts"), "-c", "copy", "-f", "hls",
-        "-hls_time", "2", "-hls_list_size", "6", "-hls_flags", "delete_segments+omit_endlist",
+        "-hls_time", "2", "-hls_list_size", "15", "-hls_flags", "delete_segments+omit_endlist",
         "-hls_segment_filename", os.path.join(out, "seg%05d.ts"), os.path.join(out, "live.m3u8"),
     ]
     CHILDREN.append(subprocess.Popen(cmd, stdin=subprocess.DEVNULL))
