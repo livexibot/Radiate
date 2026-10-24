@@ -30,8 +30,9 @@ export function TopBar() {
   const now = useNow(15_000);
   return (
     <header className="appbar">
-      <div className="appbar-start">
-        <span className="brand-mark" aria-hidden="true">R</span>
+      <div className="appbar-start" aria-hidden="true">
+        <span className="brand-mark">R</span>
+        <span className="brand-name">Radiate</span>
       </div>
       <nav className="appbar-nav" aria-label="Main">
         {NAV.map((cluster, i) => (

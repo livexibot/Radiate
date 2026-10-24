@@ -36,13 +36,15 @@
 .golive .num { color: var(--c-text-2); }
 .pctrls { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
 .pctrls .grp { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
-.cb { height: 2.9rem; min-width: 2.9rem; padding: 0 var(--sp-4); border-radius: var(--r-md); border: 0; background: var(--c-glass-btn); color: #fff; display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); font-size: var(--fs-sm); font-weight: var(--fw-bold); backdrop-filter: blur(8px); transition: background var(--t-fast), color var(--t-fast); }
-.cb:hover:not(:disabled) { background: var(--c-glass-btn-hover); }
-.cb.on { background: #fff; color: #000; }
+.cb { height: 2.9rem; min-width: 2.9rem; padding: 0 var(--sp-4); border-radius: var(--r-md); border: 0; background: var(--c-glass-btn); color: #fff; display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); font-size: var(--fs-sm); font-weight: var(--fw-bold); backdrop-filter: blur(8px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast); }
+.cb:hover:not(:disabled) { background: var(--c-glass-btn-hover); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16); }
+.cb:focus-visible { outline-offset: 3px; }
+.cb.on { background: #fff; color: #000; box-shadow: none; }
 .cb.star.on { background: var(--c-accent); color: var(--c-accent-ink); }
 .cb.round { border-radius: 50%; padding: 0; }
 .cb .icon { width: 1.25rem; height: 1.25rem; stroke-width: 2; }
-.vol { display: inline-flex; align-items: center; gap: var(--sp-2); background: var(--c-glass-btn); border-radius: var(--r-md); padding-right: var(--sp-4); backdrop-filter: blur(8px); }
+.vol { display: inline-flex; align-items: center; gap: var(--sp-2); background: var(--c-glass-btn); border-radius: var(--r-md); padding-right: var(--sp-4); backdrop-filter: blur(8px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.vol .cb { box-shadow: none; }
 .vol .cb { background: transparent; backdrop-filter: none; }
 .vol input { width: 6.5rem; }
 .pcard { position: absolute; inset: 0; display: grid; place-items: center; z-index: 2; background: rgba(5, 7, 12, 0.6); padding: var(--sp-8); }
@@ -78,10 +80,10 @@
 .mv-tile:focus-visible { outline: none; }
 .mv-tile.focusring { box-shadow: inset 0 0 0 3px var(--c-accent); }
 .mv-tile.focusring::after { content: ""; position: absolute; inset: 0; box-shadow: inset 0 0 0 3px var(--c-accent); border-radius: var(--r-md); pointer-events: none; z-index: 3; }
-.mv-tile .tag { position: absolute; left: var(--sp-3); top: var(--sp-3); right: 5rem; display: inline-flex; gap: var(--sp-2); align-items: center; background: var(--c-scrim); padding: var(--sp-1) var(--sp-3); border-radius: var(--r-sm); font-size: var(--fs-xs); font-weight: var(--fw-bold); z-index: 2; max-width: max-content; backdrop-filter: blur(6px); }
+.mv-tile .tag { position: absolute; left: var(--sp-3); top: var(--sp-3); right: 5rem; display: inline-flex; gap: 0.35em; align-items: center; background: var(--c-scrim); padding: var(--sp-1) var(--sp-3); border-radius: var(--r-pill); font-size: var(--fs-xs); font-weight: var(--fw-bold); z-index: 2; max-width: max-content; backdrop-filter: blur(6px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
 .mv-tile.big .tag { font-size: var(--fs-sm); padding: var(--sp-2) var(--sp-3); }
 .tag-code { font-weight: var(--fw-black); color: var(--c-text-2); letter-spacing: 0.04em; }
-.mv-tile .aud { position: absolute; right: var(--sp-3); top: var(--sp-3); background: var(--c-accent); color: var(--c-accent-ink); padding: var(--sp-1) var(--sp-2); border-radius: var(--r-xs); font-size: var(--fs-2xs); font-weight: var(--fw-black); z-index: 2; }
+.mv-tile .aud { position: absolute; right: var(--sp-3); top: var(--sp-3); background: var(--c-accent); color: var(--c-accent-ink); padding: var(--sp-1) var(--sp-3); border-radius: var(--r-pill); font-size: var(--fs-2xs); font-weight: var(--fw-black); z-index: 2; }
 .mv-over { position: absolute; inset: 0; display: grid; place-items: center; padding: var(--sp-4); background: rgba(5, 7, 12, 0.78); border-radius: var(--r-md); z-index: 4; }
 .mv-over.empty-tile { background: var(--c-surface-1); align-content: center; gap: var(--sp-3); text-align: center; }
 .mv-over.empty-tile b { font-size: var(--fs-md); max-width: 22rem; }

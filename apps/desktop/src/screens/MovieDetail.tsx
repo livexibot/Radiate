@@ -50,15 +50,15 @@ export function MovieDetail({ id }: { id: string }) {
               <div className="btns">
                 {inProgress ? (
                   <>
-                    <button type="button" className="btn pri" onClick={() => play(m.progress ?? undefined)}>
+                    <button type="button" className="btn pri lg" onClick={() => play(m.progress ?? undefined)}>
                       <Icon name="play" /> Resume
                     </button>
-                    <button type="button" className="btn" onClick={() => play(0)}>
+                    <button type="button" className="btn lg" onClick={() => play(0)}>
                       From the start
                     </button>
                   </>
                 ) : (
-                  <button type="button" className="btn pri" onClick={() => play()}>
+                  <button type="button" className="btn pri lg" onClick={() => play()}>
                     <Icon name="play" /> Play
                   </button>
                 )}

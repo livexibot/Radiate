@@ -32,7 +32,7 @@ function Mark({ text, q }: { text: string; q: string }) {
 }
 
 export function Search({ initial }: { initial?: string }) {
-  const { navigate, toast } = useApp();
+  const { navigate, toast, sources } = useApp();
   const [q, setQ] = useState(initial ?? "");
   const query = useDebounced(q.trim(), 250);
   const [res, setRes] = useState<SearchResults | null>(null);
@@ -66,6 +66,8 @@ export function Search({ initial }: { initial?: string }) {
     };
   }, [query, toast]);
 
+  const hasMovies = !!sources?.some((s) => s.movieCount > 0);
+  const hasSeries = !!sources?.some((s) => s.seriesCount > 0);
   const playChannel = (c: Channel) => navigate({ name: "player", target: { type: "channel", id: c.id }, ctx: { groupId: c.groupId, favoritesOnly: false } });
   const openVod = (v: VodItem) => navigate(v.kind === "series" ? { name: "seriesDetail", id: v.id } : { name: "movie", id: v.id });
   const show = (f: Filter) => filter === "all" || filter === f;
@@ -109,6 +111,26 @@ export function Search({ initial }: { initial?: string }) {
             </button>
           ) : null}
         </label>
+        {!q.trim() && (hasMovies || hasSeries) ? (
+          <div className="search-shortcuts">
+            {hasMovies ? (
+              <button type="button" className="card shortcut" onClick={() => navigate({ name: "library", tab: "movie" })}>
+                <span className="shortcut-ico">
+                  <Icon name="film" />
+                </span>
+                <b>Movies</b>
+              </button>
+            ) : null}
+            {hasSeries ? (
+              <button type="button" className="card shortcut" onClick={() => navigate({ name: "library", tab: "series" })}>
+                <span className="shortcut-ico">
+                  <Icon name="series" />
+                </span>
+                <b>Series</b>
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {res ? (
           <div className="search-chips">
             <Chips items={chips} value={filter} onChange={(f) => setFilter(f as Filter)} label="Result types" />

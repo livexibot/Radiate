@@ -513,7 +513,7 @@ function PlaybackSection() {
         </div>
         <div className="set-row">
           <span>Volume</span>
-          <input type="range" min={0} max={1} step={0.05} value={prefs.volume} onChange={(e) => void setPrefs({ volume: Number(e.target.value) })} aria-label="Volume" />
+          <input type="range" className="range" style={{ "--fill": `${prefs.volume * 100}%` } as React.CSSProperties} min={0} max={1} step={0.05} value={prefs.volume} onChange={(e) => void setPrefs({ volume: Number(e.target.value) })} aria-label="Volume" />
           <span className="mute num set-val">{Math.round(prefs.volume * 100)}%</span>
         </div>
         <div className="set-row">

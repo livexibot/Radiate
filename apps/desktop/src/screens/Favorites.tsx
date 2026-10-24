@@ -62,7 +62,7 @@ export function Favorites() {
       ) : (
         <>
           {view.sports.length > 0 ? (
-            <Section title="Live sports" count={view.sports.length} size="lg">
+            <Section title="Live sports" count={view.sports.length} size="lg" live>
               {view.sports.map((it) => (
                 <ChannelCard key={it.channel.id} channel={it.channel} now={it.now} at={now} onOpen={() => play(it.channel)} onMenu={openMenu(it.channel)} live />
               ))}
@@ -96,11 +96,11 @@ export function Favorites() {
   );
 }
 
-function Section({ title, count, size, children }: { title: string; count?: number; size?: "lg"; children: React.ReactNode }) {
+function Section({ title, count, size, live, children }: { title: string; count?: number; size?: "lg"; live?: boolean; children: React.ReactNode }) {
   return (
     <section className="row">
       <div className="row-head">
-        <h2 className="row-title">
+        <h2 className={live ? "row-title live" : "row-title"}>
           {title}
           {count !== undefined ? <span className="row-count num">{count}</span> : null}
         </h2>
