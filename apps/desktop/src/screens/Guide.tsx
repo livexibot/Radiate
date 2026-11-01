@@ -12,6 +12,7 @@ import { chunksFor, floorTo, layoutRow, mergeProgrammes, programmeAt, revealX, r
 import { shortSportsName, sportsFirst } from "../lib/sports";
 import { clock, dayLabel, DAY, HOUR, MINUTE, progressOf, timeRange } from "../lib/time";
 import { clampIndex, computeWindow } from "../lib/virtual";
+import { useAppearance } from "../plugins/host";
 import { useApp } from "../state/app";
 import { useChannelActions } from "../state/channelActions";
 import { mergeGroupsByName, useDebounced, useGroups, useLoad, useNow, usePagedChannels, useSportsOverrides } from "../state/hooks";
@@ -24,10 +25,22 @@ function useRem(): number {
   useEffect(() => {
     const on = () => setRem(parseFloat(getComputedStyle(document.documentElement).fontSize) || 16);
     window.addEventListener("resize", on);
-    return () => window.removeEventListener("resize", on);
+    // a theme, layout or Size change
+    window.addEventListener("radiate-scale", on);
+    return () => {
+      window.removeEventListener("resize", on);
+      window.removeEventListener("radiate-scale", on);
+    };
   }, []);
   return rem;
 }
+
+/** Row height and minute width, in rem, for each guide density a layout can pick. */
+const DENSITY = {
+  compact: { row: 3.25, minute: 0.42 },
+  normal: { row: 4.25, minute: 0.5 },
+  roomy: { row: 5.25, minute: 0.6 },
+} as const;
 
 interface Selection {
   row: number;
@@ -62,11 +75,13 @@ export function Guide({ initialChip }: { initialChip?: string }) {
   const list = usePagedChannels(filter);
   const now = useNow(30_000);
   const rem = useRem();
-  const ROW = Math.round(rem * 4.25);
+  const { layout } = useAppearance();
+  const density = DENSITY[layout.guide.density];
+  const ROW = Math.round(rem * density.row);
   const RULER = Math.round(rem * 2.6);
   const CHW = Math.round(rem * 20);
   const [anchor] = useState(() => Date.now());
-  const scale = useMemo<GuideScale>(() => ({ origin: floorTo(anchor - DAY, 30), end: floorTo(anchor + 7 * DAY, 30), pxPerMinute: rem * 0.5 }), [anchor, rem]);
+  const scale = useMemo<GuideScale>(() => ({ origin: floorTo(anchor - DAY, 30), end: floorTo(anchor + 7 * DAY, 30), pxPerMinute: rem * density.minute }), [anchor, rem, density.minute]);
 
   const gridRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ left: 0, top: 0, width: 1200, height: 600 });
@@ -361,6 +376,7 @@ export function Guide({ initialChip }: { initialChip?: string }) {
             <div
               key={b.programme.start}
               className={cls.join(" ")}
+              data-ui="programme"
               style={b.isNow ? ({ left: CHW + b.left, width: b.width, "--elapsed": `${Math.max(0, xNow - b.left)}px` } as React.CSSProperties) : { left: CHW + b.left, width: b.width }}
               onClick={() => select(i, b.programme)}
               onDoubleClick={() => (b.isNow ? play(c) : undefined)}
@@ -379,9 +395,9 @@ export function Guide({ initialChip }: { initialChip?: string }) {
 
   const info = selProg;
   return (
-    <div className="screen fill guide">
+    <div className={`screen fill guide ${layout.guide.density}`}>
       <h1 className="sr-only">Guide</h1>
-      <div className="guide-head">
+      <div className="guide-head" data-ui="guide-details" hidden={!layout.guide.details}>
         <ChannelStill channel={selChannel} onPlay={() => selChannel && play(selChannel)} className="guide-still" />
         <div className="guide-info">
           {selChannel ? (
@@ -427,6 +443,7 @@ export function Guide({ initialChip }: { initialChip?: string }) {
       ) : (
         <div
           className="ggrid"
+          data-ui="guide-grid"
           ref={gridRef}
           tabIndex={0}
           role="grid"

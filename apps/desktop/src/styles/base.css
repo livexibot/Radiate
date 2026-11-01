@@ -5,8 +5,11 @@
      - where you are (top bar, settings nav, group list): raised neutral surface, full-strength text
      - a value you picked (chips, segmented, toggles, checkboxes): accent fill
      - keyboard focus: white ring, always
+   These names are the theme API (docs/plugins.md): a theme sets them and
+   nothing else. `.dark-scope` repeats the dark set for what sits on a
+   picture (player, multiview), so a light theme leaves video dark.
    ===================================================================== */
-:root {
+:root, .dark-scope {
   /* colour: neutrals, darkest to lightest */
   --c-bg: #090c12;
   --c-surface-1: #11151f;
@@ -44,6 +47,17 @@
   --c-focus: #ffffff;
   --c-accent-line: rgba(245, 165, 36, 0.5);
   --c-live-glow: rgba(255, 90, 78, 0.5);
+  --c-tint: rgba(255, 255, 255, 0.02);      /* the faintest lift over a surface */
+  --c-tint-2: rgba(255, 255, 255, 0.08);    /* a chip on a surface */
+  --c-track: rgba(255, 255, 255, 0.14);     /* the empty part of a progress bar */
+  --c-halo: rgba(255, 255, 255, 0.1);       /* the glow around a focused card */
+  --c-pri: var(--c-text);                   /* the main button */
+  --c-pri-ink: var(--c-bg);
+  --c-pri-hover: #ffffff;
+  --c-pri-glow: rgba(255, 255, 255, 0.45);
+  --c-glow: rgba(58, 76, 118, 0.2);         /* the light behind the top of the window */
+  --c-shade: rgba(0, 0, 0, 0.7);            /* shadow colour */
+  --ui-scale: 1;                            /* set by the theme, layout and Size together */
 
   /* type */
   --font: "Manrope Variable", "Manrope", "Segoe UI", system-ui, sans-serif;
@@ -116,6 +130,9 @@
 
 /* ===== Base ===== */
 *, *::before, *::after { box-sizing: border-box; }
+html { font-size: calc(100% * var(--ui-scale)); }
+/* text inherits a colour, not a token: restate it where the tokens change */
+.dark-scope { color: var(--c-text); }
 html, body, #root { height: 100%; }
 body {
   margin: 0;
@@ -159,7 +176,7 @@ img { display: block; max-width: 100%; }
 }
 
 /* ===== App frame ===== */
-.app { position: fixed; inset: 0; display: grid; grid-template-rows: var(--topbar-h) minmax(0, 1fr); background: radial-gradient(120% 60% at 50% -12%, rgba(58, 76, 118, 0.2), transparent 62%), var(--c-bg); }
+.app { position: fixed; inset: 0; display: grid; grid-template-rows: var(--topbar-h) minmax(0, 1fr); background: radial-gradient(120% 60% at 50% -12%, var(--c-glow), transparent 62%), var(--c-bg); }
 .app.bare { grid-template-rows: minmax(0, 1fr); background: var(--c-bg); }
 .main-area { min-width: 0; min-height: 0; overflow: hidden; position: relative; }
 .screen { position: relative; overflow: hidden auto; height: 100%; padding: var(--sp-6) var(--gutter) var(--sp-12); scroll-padding: var(--sp-8); }
@@ -175,11 +192,25 @@ img { display: block; max-width: 100%; }
 .appbar-item { display: inline-flex; align-items: center; gap: var(--sp-2); height: 2.4rem; padding: 0 var(--sp-4); border: 0; border-radius: var(--r-pill); background: transparent; color: var(--c-text-3); font-size: var(--fs-sm); font-weight: var(--fw-bold); white-space: nowrap; transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast); }
 .appbar-item .icon { width: 1.1rem; height: 1.1rem; }
 .appbar-item:hover { color: var(--c-text); background: var(--c-surface-2); }
-.appbar-item.on { color: var(--c-text); background: var(--c-surface-3); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 4px 12px -6px rgba(0, 0, 0, 0.6); }
+.appbar-item.on { color: var(--c-text); background: var(--c-surface-3); box-shadow: inset 0 1px 0 var(--c-tint), 0 4px 12px -6px var(--c-shade); }
 .appbar-item.on .icon { color: var(--c-accent); }
 .appbar-item:focus-visible { outline-offset: 1px; }
 .appbar-end { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-4); min-width: 0; }
 .appbar-clock { font-size: var(--fs-md); font-weight: var(--fw-bold); color: var(--c-text-2); letter-spacing: 0.01em; }
+
+/* the side rail (layouts with nav "rail") */
+.app.rail { grid-template-rows: minmax(0, 1fr); grid-template-columns: auto minmax(0, 1fr); }
+.apprail { position: relative; z-index: 10; display: flex; flex-direction: column; align-items: center; gap: var(--sp-5); width: 6rem; padding: var(--sp-5) var(--sp-2); background: rgb(var(--c-bg-rgb) / 0.6); box-shadow: 1px 0 0 var(--c-line); overflow: hidden auto; scrollbar-width: none; }
+.apprail-nav { display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-1); width: 100%; }
+.apprail-cluster { display: flex; flex-direction: column; gap: var(--sp-1); }
+.apprail-sep { height: 1px; margin: var(--sp-2) var(--sp-4); background: var(--c-line-strong); }
+.apprail-item { display: grid; justify-items: center; gap: 0.3rem; padding: var(--sp-3) var(--sp-1); border: 0; border-radius: var(--r-lg); background: transparent; color: var(--c-text-3); font-size: var(--fs-2xs); font-weight: var(--fw-bold); white-space: nowrap; transition: background var(--t-fast), color var(--t-fast); }
+.apprail-item .icon { width: 1.4rem; height: 1.4rem; }
+.apprail-item:hover { color: var(--c-text); background: var(--c-surface-2); }
+.apprail-item.on { color: var(--c-text); background: var(--c-surface-3); box-shadow: inset 0 1px 0 var(--c-tint), 0 4px 12px -6px var(--c-shade); }
+.apprail-item.on .icon { color: var(--c-accent); }
+.apprail-end { margin-top: auto; display: grid; justify-items: center; gap: var(--sp-3); }
+.apprail-end .appbar-clock { font-size: var(--fs-sm); }
 
 .brand-mark { width: 2.25rem; height: 2.25rem; border-radius: var(--r-sm); background: linear-gradient(150deg, var(--c-accent-hover), var(--c-accent) 60%); color: var(--c-accent-ink); display: grid; place-items: center; flex: none; font-weight: var(--fw-black); font-size: var(--fs-lg); line-height: 1; box-shadow: 0 6px 18px -8px var(--c-accent-line), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
 .brand-mark.lg { width: 3rem; height: 3rem; border-radius: var(--r-md); font-size: var(--fs-xl); }
@@ -193,8 +224,8 @@ img { display: block; max-width: 100%; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); height: 2.75rem; padding: 0 var(--sp-5); border-radius: var(--r-md); border: 0; background: var(--c-surface-3); color: var(--c-text); font-weight: var(--fw-bold); font-size: var(--fs-sm); white-space: nowrap; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05); transition: background var(--t-fast), color var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast); }
 .btn:hover:not(:disabled) { background: var(--c-surface-4); }
 .btn:active:not(:disabled) { transform: scale(0.98); }
-.btn.pri { background: var(--c-text); color: var(--c-bg); box-shadow: 0 8px 22px -12px rgba(255, 255, 255, 0.45); }
-.btn.pri:hover:not(:disabled) { background: #fff; }
+.btn.pri { background: var(--c-pri); color: var(--c-pri-ink); box-shadow: 0 8px 22px -12px var(--c-pri-glow); }
+.btn.pri:hover:not(:disabled) { background: var(--c-pri-hover); }
 .btn.pri:disabled { box-shadow: none; }
 .btn.acc { background: var(--c-accent); color: var(--c-accent-ink); }
 .btn.acc:hover:not(:disabled) { background: var(--c-accent-hover); }
@@ -259,7 +290,7 @@ img { display: block; max-width: 100%; }
 input[type="range"] { accent-color: var(--c-accent); }
 .error-line { color: var(--c-danger); font-weight: var(--fw-semi); font-size: var(--fs-sm); }
 
-.bar { display: block; height: 4px; background: rgba(255, 255, 255, 0.14); border-radius: var(--r-pill); overflow: hidden; }
+.bar { display: block; height: 4px; background: var(--c-track); border-radius: var(--r-pill); overflow: hidden; }
 .bar b { display: block; height: 100%; background: var(--c-accent); border-radius: var(--r-pill); }
 
 /* logo tiles */

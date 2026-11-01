@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { storedLayout } from "../plugins/stored";
 import { api, errorMessage, type ConnectionUsage, type PlayTarget, type Prefs, type Source } from "../api";
 
 /** Which list the player zaps through. */
@@ -25,7 +26,7 @@ export type Route =
 
 export type LibraryTab = "movie" | "series";
 
-export type SettingsSection = "sources" | "channels" | "playback" | "reactors" | "backup" | "about";
+export type SettingsSection = "sources" | "channels" | "playback" | "appearance" | "reactors" | "backup" | "about";
 
 export interface Toast {
   id: number;
@@ -80,6 +81,7 @@ function initialStack(): Route[] | null {
     series: { name: "library", tab: "series" },
     search: { name: "search" },
     settings: { name: "settings" },
+    appearance: { name: "settings", section: "appearance" },
     onboarding: { name: "onboarding" },
   };
   return simple[h] ? [simple[h]] : null;
@@ -150,8 +152,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setPrefsState(p);
       setUsage(u);
       setMpv(m);
-      // launch always opens on Home (or the first route asked for); onboarding wins when there are no sources
+      // launch opens on the layout's start screen, Home unless a layout says otherwise (or the
+      // first route asked for); onboarding wins when there are no sources
       if (srcs.length === 0) setStack([{ name: "onboarding" }]);
+      else if (!initialStack()) {
+        const start = storedLayout(p).start;
+        if (start !== "home") setStack([{ name: start }]);
+      }
     })();
   }, []);
 

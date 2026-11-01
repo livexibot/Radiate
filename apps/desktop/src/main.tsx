@@ -5,12 +5,17 @@ import "./styles/base.css";
 import "./styles/screens.css";
 import "./styles/player.css";
 import { App } from "./App";
+import { AppearanceProvider, applyCachedAppearance } from "./plugins/host";
 import { AppProvider } from "./state/app";
+
+applyCachedAppearance();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <AppProvider>
-      <App />
+      <AppearanceProvider>
+        <App />
+      </AppearanceProvider>
     </AppProvider>
   </StrictMode>,
 );

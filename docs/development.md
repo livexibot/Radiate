@@ -154,6 +154,29 @@ page.
   `player/timeshift.ts`). Left and Right move 10 s, Page Up and Page Down
   a minute, Home and End go to the oldest and to live.
 
+## Decisions (1 November 2026, 0.6.0)
+
+- The owner asked for a redesign through plugins, "however you want". The
+  first step of the plugin design (themes, then layouts, then sandboxed
+  widgets, then sources) is in: themes and layouts are JSON data checked
+  against fixed lists (`src/plugins`), installed from a file in Settings ›
+  Appearance and stored in prefs. Radiate's own look and layout are the
+  built-in "Radiate" theme and layout, so the core uses the same doors.
+- Built in: themes Radiate, Stadium, Floodlight (black, bigger, for across
+  the room) and Matchday (light); layouts Radiate, Couch (side rail, big
+  cards, roomy guide), Guide first (opens on a compact guide) and Desk
+  (rail, smaller, no hero, compact guide without the details panel). An
+  Accent over any theme, and a Size from 90% to 130%.
+- Launch still opens Home unless the chosen layout says otherwise.
+- A light theme never lights up video: player and multiview keep the dark
+  tokens (`.dark-scope`) and take only the accent. Artwork (posters, card
+  thumbnails) keeps light text on any theme.
+- Themes can't reach the network (no `url()`, `@import`, `@font-face`),
+  and theme CSS should target `data-ui` hooks, not class names.
+- Widgets (sandboxed frames in named slots) and source plugins are later
+  steps; none of them will open streams, see logins or change connection
+  counts.
+
 ## Layout
 
 ```
@@ -163,6 +186,7 @@ apps/desktop/src-tauri  Tauri shell: commands, events, keyring, mpv, background 
 apps/desktop/src        React + TypeScript UI; src/api has a mock backend for the browser
                         (src/reactor: the YouTube reactor box; src/updater: updates)
 docs/contract.md        the agreement between those four; change it first
+docs/plugins.md         the theme and layout format; examples in docs/plugins/
 fixtures/               invented playlists, guides and Xtream replies for tests
 ```
 

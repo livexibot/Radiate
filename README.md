@@ -27,6 +27,10 @@ AppImage, `.deb` or `.rpm` for Linux. Radiate updates itself after that.
   already loaded instead of pausing. It's YouTube's own player; a video
   that doesn't allow other apps opens on youtube.com in its own window
   instead.
+- **Your look, your layout.** Four themes (one light), eight accent
+  colours and four layouts, from a side rail and big cards for the sofa
+  to a dense desk view or opening straight on the guide. Make your own
+  theme or layout as a small JSON file ([how](docs/plugins.md)).
 - **Live TV that doesn't buffer.** A channel opens 10 s behind live, so a
   slow moment at the provider never stops the picture. The progress bar
   keeps the picture in the middle, shows the buffer built up ahead of it
@@ -86,5 +90,6 @@ already have the right to watch.
 - [Helping with Radiate](CONTRIBUTING.md)
 - [Developing Radiate](docs/development.md)
 - [How the parts fit together](docs/contract.md)
+- [Making a theme or layout](docs/plugins.md)
 
 Radiate is open source under the [MIT licence](LICENSE).

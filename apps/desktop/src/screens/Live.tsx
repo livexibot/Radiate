@@ -201,6 +201,7 @@ export function Live({ route }: { route: Extract<Route, { name: "live" }> }) {
                 return (
                   <div
                     className={isFocused ? "chrow on" : "chrow"}
+                    data-ui="channel-row"
                     onContextMenu={(e) => {
                       e.preventDefault();
                       setMenu({ x: e.clientX, y: e.clientY, items: menuFor(c, [{ label: "Watch", icon: "play", onSelect: () => play(c) }]) });

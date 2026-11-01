@@ -5,6 +5,7 @@ import { Empty } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { Logo } from "../components/Logo";
 import { Modal } from "../components/Modal";
+import { Segmented } from "../components/Segmented";
 import { Skeleton } from "../components/Skeleton";
 import { ago, DAY, shortDate } from "../lib/time";
 import { useApp, type SettingsSection } from "../state/app";
@@ -12,12 +13,14 @@ import { isSportsGroup, toggleSportsGroup } from "../lib/sports";
 import { useLoad, useSportsOverrides } from "../state/hooks";
 import { ReactorList } from "../reactor/ReactorList";
 import { UpdateSection } from "../updater";
+import { AppearanceSection } from "./AppearanceSection";
 import { EpgMatchPicker } from "./EpgMatchPicker";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "sources", label: "Sources & guides" },
   { id: "channels", label: "Channels & groups" },
   { id: "playback", label: "Playback" },
+  { id: "appearance", label: "Appearance" },
   { id: "reactors", label: "Reactors" },
   { id: "backup", label: "Backup" },
   { id: "about", label: "About" },
@@ -41,6 +44,7 @@ export function Settings({ section }: { section?: SettingsSection }) {
           {current === "sources" ? <SourcesSection /> : null}
           {current === "channels" ? <ChannelsSection /> : null}
           {current === "playback" ? <PlaybackSection /> : null}
+          {current === "appearance" ? <AppearanceSection /> : null}
           {current === "reactors" ? <ReactorList /> : null}
           {current === "backup" ? <BackupSection /> : null}
           {current === "about" ? <AboutSection /> : null}
@@ -386,7 +390,7 @@ function ChannelsSection() {
 
   return (
     <div className="set-stack">
-      <section className="set-card">
+      <section className="set-card" data-ui="settings-card">
         <h3>Groups</h3>
         {!order ? (
           <Skeleton h="12rem" r={12} />
@@ -413,7 +417,7 @@ function ChannelsSection() {
           </div>
         )}
       </section>
-      <section className="set-card">
+      <section className="set-card" data-ui="settings-card">
         <h3>Hidden channels</h3>
         {!hidden ? (
           <Skeleton h="3rem" r={12} />
@@ -506,7 +510,7 @@ function PlaybackSection() {
   if (!prefs) return <Skeleton h="10rem" r={14} />;
   return (
     <div className="set-stack">
-      <section className="set-card">
+      <section className="set-card" data-ui="settings-card">
         <div className="set-row">
           <span>Stream stats</span>
           <input type="checkbox" className="toggle" checked={prefs.showStats} onChange={(e) => void setPrefs({ showStats: e.target.checked })} aria-label="Show stream stats" />
@@ -561,18 +565,6 @@ function PlaybackSection() {
   );
 }
 
-function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { id: T; label: string }[]; onChange: (v: T) => void }) {
-  return (
-    <div className="seg" role="radiogroup" aria-label={label}>
-      {options.map((o) => (
-        <button type="button" key={o.id} role="radio" aria-checked={o.id === value} className={o.id === value ? "on" : ""} onClick={() => onChange(o.id)}>
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 // ---------- Backup ----------
 
 function BackupSection() {
@@ -611,7 +603,7 @@ function BackupSection() {
   };
   return (
     <div className="set-stack">
-      <section className="set-card">
+      <section className="set-card" data-ui="settings-card">
         <h3>Export</h3>
         <label className="check">
           <input type="checkbox" checked={secrets} onChange={(e) => setSecrets(e.target.checked)} />
@@ -623,7 +615,7 @@ function BackupSection() {
           </button>
         </div>
       </section>
-      <section className="set-card">
+      <section className="set-card" data-ui="settings-card">
         <h3>Import</h3>
         <div className="btns">
           <button type="button" className="btn" disabled={busy} onClick={() => void doImport()}>

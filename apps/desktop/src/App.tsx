@@ -14,6 +14,7 @@ import { Player } from "./screens/Player";
 import { Search } from "./screens/Search";
 import { SeriesDetail } from "./screens/SeriesDetail";
 import { Settings } from "./screens/Settings";
+import { useAppearance } from "./plugins/host";
 import { useApp, type Route } from "./state/app";
 import { useSpatialNav } from "./state/useSpatialNav";
 
@@ -23,7 +24,10 @@ function isTyping(el: Element | null) {
 
 export function App() {
   const { route, navigate, back, sources, toast, sourceName } = useApp();
+  const { layout } = useAppearance();
   const fullscreen = route.name === "player" || route.name === "multiview" || route.name === "onboarding";
+  // video screens keep the dark tokens under any theme
+  const onPicture = route.name === "player" || route.name === "multiview";
   useSpatialNav(route.name !== "player" && route.name !== "multiview");
 
   // global shortcuts
@@ -124,7 +128,7 @@ export function App() {
   }
 
   return (
-    <div className={fullscreen ? "app bare" : "app"}>
+    <div className={["app", fullscreen ? "bare" : layout.nav === "rail" ? "rail" : "", onPicture ? "dark-scope" : ""].filter(Boolean).join(" ")}>
       {fullscreen ? null : <TopBar />}
       <main className="main-area">{screen}</main>
       <Toasts />

@@ -1,5 +1,6 @@
 import { clock } from "../lib/time";
 import { useNow } from "../state/hooks";
+import { useAppearance } from "../plugins/host";
 import { useApp, type Route } from "../state/app";
 import { UpdatePill } from "../updater";
 import { Icon, type IconName } from "./Icon";
@@ -27,9 +28,11 @@ const NAV: Item[][] = [
 
 export function TopBar() {
   const { route, navigate } = useApp();
+  const { layout } = useAppearance();
   const now = useNow(15_000);
+  if (layout.nav === "rail") return <SideRail />;
   return (
-    <header className="appbar">
+    <header className="appbar" data-ui="nav">
       <div className="appbar-start" aria-hidden="true">
         <span className="brand-mark">R</span>
         <span className="brand-name">Radiate</span>
@@ -58,6 +61,46 @@ export function TopBar() {
         ))}
       </nav>
       <div className="appbar-end">
+        <UpdatePill />
+        <span className="appbar-clock num" aria-label={`Time ${clock(now)}`}>
+          {clock(now)}
+        </span>
+      </div>
+    </header>
+  );
+}
+
+/** The same destinations down the left edge (layouts with `nav: "rail"`). */
+function SideRail() {
+  const { route, navigate } = useApp();
+  const now = useNow(15_000);
+  return (
+    <header className="apprail" data-ui="nav">
+      <span className="brand-mark" aria-hidden="true">R</span>
+      <nav className="apprail-nav" aria-label="Main">
+        {NAV.map((cluster, i) => (
+          <div className="apprail-cluster" key={i}>
+            {i > 0 ? <span className="apprail-sep" aria-hidden="true" /> : null}
+            {cluster.map((it) => {
+              const on = route.name === it.route;
+              return (
+                <button
+                  key={it.route}
+                  type="button"
+                  className={on ? "apprail-item on" : "apprail-item"}
+                  aria-current={on ? "page" : undefined}
+                  title={`${it.label} (${it.key})`}
+                  onClick={() => navigate({ name: it.route } as Route)}
+                >
+                  <Icon name={it.icon} />
+                  <span>{it.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </nav>
+      <div className="apprail-end">
         <UpdatePill />
         <span className="appbar-clock num" aria-label={`Time ${clock(now)}`}>
           {clock(now)}

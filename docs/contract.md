@@ -354,3 +354,28 @@ captions or blurbs in the interface. Error messages are plain language.
 exists and `src/api/mock.ts` otherwise, so `npm run dev` runs in a plain
 browser with invented demo channels (the concept's Northwind News, Arena
 Sports 1, Terra Documentary, ...) and a public test HLS stream.
+
+### Themes and layouts (`src/plugins`)
+
+Appearance is data the UI reads from prefs; the core stores it as extra
+fields and never looks inside.
+
+- `prefs.appearance`: `{ theme?: string, layout?: string, accent?: string | null, size?: number }`
+  (ids of a theme and a layout, an accent `#rrggbb` over the theme's, and
+  the user's size 0.8 to 1.4).
+- `prefs.plugins`: the installed theme and layout files, as checked by
+  `parsePlugin` (`src/plugins/validate.ts`). Built-in ones are not stored.
+
+`docs/plugins.md` is the public format. Themes set only the tokens listed
+in `THEME_TOKENS`; values are checked by kind, and theme CSS may not load
+anything. The appearance is a `<style id="radiate-appearance">` written
+after the app's stylesheets; the last one is kept in localStorage and
+written before the first frame. `.dark-scope` (player, multiview) keeps
+the dark tokens under a light theme. Layouts choose from fixed values:
+`nav`, `start`, `scale`, `home.hero`, `home.rows`, `home.cards`,
+`guide.density`, `guide.details`. Shift held at launch, or `?safe`, turns
+both off for the run.
+
+No plugin opens a stream, sees a stream address or a login, or changes
+connection counts.
+

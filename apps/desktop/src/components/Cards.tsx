@@ -22,6 +22,7 @@ export function ChannelCard({ channel, now, at, onOpen, onMenu, sub, live }: Cha
     <button
       type="button"
       className={live && now ? "card live" : "card"}
+      data-ui="channel-card"
       onClick={onOpen}
       onContextMenu={(e) => {
         if (!onMenu) return;
@@ -50,6 +51,7 @@ export function EventCard({ channel, programme, at, onOpen, onMenu }: { channel:
     <button
       type="button"
       className="card event"
+      data-ui="event-card"
       onClick={onOpen}
       onContextMenu={(e) => {
         if (!onMenu) return;
@@ -76,7 +78,7 @@ export function EventCard({ channel, programme, at, onOpen, onMenu }: { channel:
 
 export function VodCard({ item, onOpen, sub }: { item: VodItem; onOpen: () => void; sub?: string }) {
   return (
-    <button type="button" className="card" onClick={onOpen} aria-label={item.name}>
+    <button type="button" className="card" data-ui="vod-card" onClick={onOpen} aria-label={item.name}>
       <span className={`card-thumb ${tone(item.name)}`}>
         <span className="card-badge">{item.kind === "series" ? "SERIES" : "MOVIE"}</span>
         <span className="card-title-art">{item.name}</span>
@@ -94,7 +96,7 @@ export function Poster({ item, onOpen }: { item: VodItem; onOpen: () => void }) 
   const [broken, setBroken] = useState(false);
   const art = !!item.poster && !broken;
   return (
-    <button type="button" className="poster" onClick={onOpen} aria-label={item.name}>
+    <button type="button" className="poster" data-ui="poster" onClick={onOpen} aria-label={item.name}>
       <span className={`poster-art ${tone(item.name)}`}>
         {/* artwork carries its own title; the name is drawn only on the plain tile */}
         {art ? <img src={item.poster ?? undefined} alt="" loading="lazy" onError={() => setBroken(true)} /> : <span className="poster-name">{item.name}</span>}

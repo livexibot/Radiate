@@ -1,5 +1,6 @@
 // Mirror of docs/contract.md sections 1-3. All ids are strings, all times are Unix ms.
 
+import type { Appearance } from "../plugins/types";
 import type { OverlayPrefs, Reactor } from "../reactor/link";
 
 export type SourceKind = "m3u" | "xtream";
@@ -197,6 +198,10 @@ export interface Prefs {
   reactors?: Reactor[] | null;
   /** Where the reactor overlay sits, its volume and how far the match is held back. */
   reactorOverlay?: Partial<OverlayPrefs> | null;
+  /** Theme, layout, accent and size (see plugins/types.ts). */
+  appearance?: Appearance | null;
+  /** Installed theme and layout files, as read from the file and checked. */
+  plugins?: unknown[] | null;
 }
 
 export interface EpgCandidate {

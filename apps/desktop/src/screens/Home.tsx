@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { api, type Channel, type Group, type Programme, type VodItem } from "../api";
 import { ChannelCard, EventCard, VodCard } from "../components/Cards";
 import { ContextMenu, type MenuState } from "../components/ContextMenu";
@@ -11,6 +11,8 @@ import { liveSports, onNow, pickHero, startingSoon, type LiveItem } from "../lib
 import { monogram, tone } from "../lib/monogram";
 import { isSportsGroup } from "../lib/sports";
 import { clock, HOUR, progressOf, timeRange } from "../lib/time";
+import { useAppearance } from "../plugins/host";
+import type { HomeRow } from "../plugins/types";
 import { useApp, type Route } from "../state/app";
 import { useChannelActions } from "../state/channelActions";
 import { useLoad, useNow, useNowNext, useSportsOverrides } from "../state/hooks";
@@ -40,6 +42,8 @@ export function Home() {
   const overrides = useSportsOverrides();
   const { menuFor } = useChannelActions();
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const { layout } = useAppearance();
+  const big = layout.home.cards === "lg";
 
   const { data } = useLoad<HomeData>(async () => {
     const groups = await api.groupsList("live", false).catch(() => [] as Group[]);
@@ -70,8 +74,8 @@ export function Home() {
     const shown = new Set([...sports.map((s) => s.channel.id), ...data.favorites.map((c) => c.id)]);
     const rest = onNow(data.others, nn, now, shown);
     // the hero is already the biggest way in; the row shows the other events
-    return { sports: sports.filter((s) => s.channel.id !== hero?.channel.id), hero, soon, rest };
-  }, [data, nn, now, overrides]);
+    return { sports: layout.home.hero ? sports.filter((s) => s.channel.id !== hero?.channel.id) : sports, hero, soon, rest };
+  }, [data, nn, now, overrides, layout.home.hero]);
 
   const play = (c: Channel, favoritesOnly = false) =>
     navigate({ name: "player", target: { type: "channel", id: c.id }, ctx: { groupId: favoritesOnly ? null : c.groupId, favoritesOnly } });
@@ -81,13 +85,67 @@ export function Home() {
   const hasMovies = !!sources?.some((s) => s.movieCount > 0);
   const hasSeries = !!sources?.some((s) => s.seriesCount > 0);
 
+  const rowsById: Record<HomeRow, React.ReactNode> = {
+    "live-sports": (
+      <>
+        {!view || view.sports.length > 0 ? (
+          <Row title="Live sports" size="lg" live more={{ label: "Guide", onClick: () => navigate({ name: "guide", chip: "sports" }) }}>
+            {!view ? <CardSkeletons /> : view.sports.map((it) => <ChannelCard key={it.channel.id} channel={it.channel} now={it.now} at={now} onOpen={() => play(it.channel)} onMenu={openMenu(it.channel)} live />)}
+          </Row>
+        ) : null}
+      </>
+    ),
+    "favorites": (
+      <>
+        {!data || data.favorites.length > 0 ? (
+          <Row title="Favorites" size={big ? "lg" : undefined} more={{ label: "All", onClick: () => navigate({ name: "favorites" }) }}>
+            {!data ? <CardSkeletons /> : data.favorites.map((c) => <ChannelCard key={c.id} channel={c} now={nn[c.id]?.now} at={now} onOpen={() => play(c, true)} onMenu={openMenu(c)} />)}
+          </Row>
+        ) : null}
+      </>
+    ),
+    "starting-soon": (
+      <>
+        {view && view.soon.length > 0 ? (
+          <Row title="Starting soon" size={big ? "lg" : undefined}>
+            {view.soon.map((u) => (
+              <EventCard key={`${u.channel.id}|${u.programme.start}`} channel={u.channel} programme={u.programme} at={now} onOpen={() => play(u.channel)} onMenu={openMenu(u.channel)} />
+            ))}
+          </Row>
+        ) : null}
+      </>
+    ),
+    "on-now": (
+      <>
+        {!view || view.rest.length > 0 ? (
+          <Row title="On now" size={big ? "lg" : undefined} more={{ label: "Live TV", onClick: () => navigate({ name: "live" }) }}>
+            {!view ? <CardSkeletons /> : view.rest.map((it) => <ChannelCard key={it.channel.id} channel={it.channel} now={it.now} at={now} onOpen={() => play(it.channel)} onMenu={openMenu(it.channel)} />)}
+          </Row>
+        ) : null}
+      </>
+    ),
+    "library": (
+      <>
+        {data && (hasMovies || hasSeries || data.cont.length > 0) ? (
+          <Row title="Movies & series" size={big ? "lg" : undefined}>
+            {hasMovies ? <Shortcut icon="film" label="Movies" route={{ name: "library", tab: "movie" }} /> : null}
+            {hasSeries ? <Shortcut icon="series" label="Series" route={{ name: "library", tab: "series" }} /> : null}
+            {data.cont.map((v) => (
+              <VodCard key={v.id} item={v} onOpen={() => openVod(v)} sub={continueSub(v)} />
+            ))}
+          </Row>
+        ) : null}
+      </>
+    ),
+  };
+
   return (
     <div className="screen home">
       <h1 className="sr-only">Home</h1>
 
-      {!view ? (
+      {!layout.home.hero && !empty ? null : !view ? (
         <Skeleton className="hero" r={24} />
-      ) : view.hero ? (
+      ) : view.hero && layout.home.hero ? (
         <Hero item={view.hero} at={now} onPlay={() => play(view.hero!.channel, view.hero!.channel.favorite)} onMulti={() => navigate({ name: "multiview", channelId: view.hero!.channel.id })} />
       ) : empty ? (
         <Empty icon="live" title="No channels yet">
@@ -97,41 +155,7 @@ export function Home() {
         </Empty>
       ) : null}
 
-      {!view || view.sports.length > 0 ? (
-        <Row title="Live sports" size="lg" live more={{ label: "Guide", onClick: () => navigate({ name: "guide", chip: "sports" }) }}>
-          {!view ? <CardSkeletons /> : view.sports.map((it) => <ChannelCard key={it.channel.id} channel={it.channel} now={it.now} at={now} onOpen={() => play(it.channel)} onMenu={openMenu(it.channel)} live />)}
-        </Row>
-      ) : null}
-
-      {!data || data.favorites.length > 0 ? (
-        <Row title="Favorites" more={{ label: "All", onClick: () => navigate({ name: "favorites" }) }}>
-          {!data ? <CardSkeletons /> : data.favorites.map((c) => <ChannelCard key={c.id} channel={c} now={nn[c.id]?.now} at={now} onOpen={() => play(c, true)} onMenu={openMenu(c)} />)}
-        </Row>
-      ) : null}
-
-      {view && view.soon.length > 0 ? (
-        <Row title="Starting soon">
-          {view.soon.map((u) => (
-            <EventCard key={`${u.channel.id}|${u.programme.start}`} channel={u.channel} programme={u.programme} at={now} onOpen={() => play(u.channel)} onMenu={openMenu(u.channel)} />
-          ))}
-        </Row>
-      ) : null}
-
-      {!view || view.rest.length > 0 ? (
-        <Row title="On now" more={{ label: "Live TV", onClick: () => navigate({ name: "live" }) }}>
-          {!view ? <CardSkeletons /> : view.rest.map((it) => <ChannelCard key={it.channel.id} channel={it.channel} now={it.now} at={now} onOpen={() => play(it.channel)} onMenu={openMenu(it.channel)} />)}
-        </Row>
-      ) : null}
-
-      {data && (hasMovies || hasSeries || data.cont.length > 0) ? (
-        <Row title="Movies & series">
-          {hasMovies ? <Shortcut icon="film" label="Movies" route={{ name: "library", tab: "movie" }} /> : null}
-          {hasSeries ? <Shortcut icon="series" label="Series" route={{ name: "library", tab: "series" }} /> : null}
-          {data.cont.map((v) => (
-            <VodCard key={v.id} item={v} onOpen={() => openVod(v)} sub={continueSub(v)} />
-          ))}
-        </Row>
-      ) : null}
+      {layout.home.rows.map((id) => <Fragment key={id}>{rowsById[id]}</Fragment>)}
       {menu ? <ContextMenu menu={menu} onClose={() => setMenu(null)} /> : null}
     </div>
   );
@@ -139,7 +163,7 @@ export function Home() {
 
 function Row({ title, children, more, size, live }: { title: string; children: React.ReactNode; more?: { label: string; onClick: () => void }; size?: "lg"; live?: boolean }) {
   return (
-    <section className="row">
+    <section className="row" data-ui="row">
       <div className="row-head">
         <h2 className={live ? "row-title live" : "row-title"}>{title}</h2>
         {more ? (
@@ -171,7 +195,7 @@ function Hero({ item, at, onPlay, onMulti }: { item: LiveItem; at: number; onPla
   const live = !!now && now.start <= at && now.stop > at;
   const mins = now ? Math.max(0, Math.round((at - now.start) / 60_000)) : 0;
   return (
-    <section className={`hero ${tone(channel.name)}`} aria-label={channel.name}>
+    <section className={`hero ${tone(channel.name)}`} data-ui="hero" aria-label={channel.name}>
       <span className="hero-mark" aria-hidden="true">{monogram(channel.name)}</span>
       <div className="hero-body">
         <div className="hero-kicker">

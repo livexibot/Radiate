@@ -1,0 +1,23 @@
+{
+  "id": "harbor-fc",
+  "name": "Harbor FC",
+  "version": "1.0.0",
+  "radiate": "^1",
+  "kind": "theme",
+  "scheme": "dark",
+  "author": "Radiate",
+  "tokens": {
+    "c-bg": "#0a1020",
+    "c-surface-1": "#121a30",
+    "c-surface-2": "#18223c",
+    "c-surface-3": "#212d4b",
+    "c-surface-4": "#2c3a5e",
+    "c-accent": "#e63946",
+    "c-accent-hover": "#ff5a66",
+    "c-accent-ink": "#ffffff",
+    "c-accent-soft": "rgba(230, 57, 70, 0.16)",
+    "c-accent-line": "rgba(230, 57, 70, 0.5)",
+    "c-glow": "rgba(230, 57, 70, 0.14)"
+  },
+  "css": "[data-ui=\"hero\"] { box-shadow: inset 0 -4px 0 var(--c-accent); }"
+}

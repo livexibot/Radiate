@@ -1,0 +1,13 @@
+{
+  "id": "big-screen",
+  "name": "Big screen",
+  "version": "1.0.0",
+  "radiate": "^1",
+  "kind": "layout",
+  "author": "Radiate",
+  "nav": "rail",
+  "start": "guide",
+  "scale": 1.2,
+  "home": { "hero": true, "rows": ["live-sports", "favorites", "starting-soon"], "cards": "lg" },
+  "guide": { "density": "roomy", "details": true }
+}
