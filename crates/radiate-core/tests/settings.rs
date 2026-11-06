@@ -24,6 +24,7 @@ fn core_is_send_and_sync_and_futures_are_send() {
             name: "".into(),
             url: "".into(),
             epg_urls: vec![],
+            user_agent: None,
         },
         quiet,
     ));
@@ -111,6 +112,7 @@ async fn export_and_import_restore_user_state() {
                 name: "File".into(),
                 url: fixture_path("m3u/messy.m3u").to_string_lossy().into_owned(),
                 epg_urls: vec![guide.to_string_lossy().into_owned()],
+                user_agent: None,
             },
             quiet,
         )

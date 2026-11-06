@@ -26,6 +26,16 @@ pub(crate) fn client() -> Result<reqwest::Client> {
         .map_err(|e| Error::Network(format!("Couldn't set up networking: {e}")))
 }
 
+/// The same client, sending `agent` as its user agent.
+pub(crate) fn client_with_agent(agent: &str) -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent(agent)
+        .connect_timeout(Duration::from_secs(15))
+        .read_timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|e| Error::Network(format!("Couldn't set up networking: {e}")))
+}
+
 /// Whether `location` is an http(s) URL rather than a local path.
 pub(crate) fn is_remote(location: &str) -> bool {
     let lower = location

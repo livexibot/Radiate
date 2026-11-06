@@ -48,6 +48,7 @@ async fn indexes_a_messy_playlist_with_its_guide() {
                 name: "".into(),
                 url,
                 epg_urls: vec![],
+                user_agent: None,
             },
             |p| phases.lock().unwrap().push(p.phase),
         )
@@ -254,6 +255,7 @@ async fn user_state_survives_refresh() {
                 name: "Home".into(),
                 url,
                 epg_urls: vec![],
+                user_agent: None,
             },
             quiet,
         )
@@ -417,6 +419,7 @@ async fn reads_local_files_and_reports_bad_input() {
                 name: "File".into(),
                 url: fixture_path("m3u/messy.m3u").to_string_lossy().into_owned(),
                 epg_urls: vec![guide.to_string_lossy().into_owned(), "  ".into()],
+                user_agent: None,
             },
             quiet,
         )
@@ -432,6 +435,7 @@ async fn reads_local_files_and_reports_bad_input() {
                 name: "x".into(),
                 url: "/no/such/file.m3u".into(),
                 epg_urls: vec![],
+                user_agent: None,
             },
             quiet,
         )
@@ -445,6 +449,7 @@ async fn reads_local_files_and_reports_bad_input() {
                 name: "x".into(),
                 url: not_m3u.to_string_lossy().into_owned(),
                 epg_urls: vec![],
+                user_agent: None,
             },
             quiet,
         )

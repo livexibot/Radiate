@@ -60,7 +60,9 @@ impl Core {
                 name,
                 url,
                 epg_urls,
+                user_agent,
             } => {
+                let user_agent = clean_agent(user_agent);
                 let url = url.trim().to_string();
                 if url.is_empty() {
                     return Err(Error::Invalid(
@@ -68,7 +70,8 @@ impl Core {
                     ));
                 }
                 report("playlist", 0, None);
-                let playlist = fetch::playlist(&self.inner.http, &url).await?;
+                let http = self.http_for(user_agent.as_deref())?;
+                let playlist = fetch::playlist(&http, &url).await?;
                 if playlist.entries.is_empty() {
                     return Err(Error::Parse(if playlist.looks_like_m3u {
                         "This playlist has no channels.".into()
@@ -80,8 +83,8 @@ impl Core {
                 {
                     let conn = self.conn();
                     conn.execute(
-                        "INSERT INTO sources (id, name, kind, url, epg_urls, created_at) VALUES (?1, ?2, 'm3u', ?3, ?4, ?5)",
-                        params![id, name, url, json_urls(&epg_urls), now_ms()],
+                        "INSERT INTO sources (id, name, kind, url, epg_urls, created_at, user_agent) VALUES (?1, ?2, 'm3u', ?3, ?4, ?5, ?6)",
+                        params![id, name, url, json_urls(&epg_urls), now_ms(), user_agent],
                     )?;
                 }
                 let rows = rows_from_m3u(&id, playlist);
@@ -96,7 +99,9 @@ impl Core {
                 username,
                 password,
                 epg_urls,
+                user_agent,
             } => {
+                let user_agent = clean_agent(user_agent);
                 let address = normalize_server(&server)?;
                 let username = Some(username.trim().to_string())
                     .filter(|u| !u.is_empty())
@@ -107,16 +112,20 @@ impl Core {
                     .or(address.password)
                     .ok_or_else(|| Error::Invalid("Enter the password.".into()))?;
                 report("playlist", 0, None);
-                let client =
-                    XtreamClient::new(self.inner.http.clone(), &address.base, &username, &password);
+                let client = XtreamClient::new(
+                    self.http_for(user_agent.as_deref())?,
+                    &address.base,
+                    &username,
+                    &password,
+                );
                 let account = client.login().await?;
                 let name = display_name(&name, &address.base);
                 {
                     let conn = self.conn();
                     conn.execute(
-                        "INSERT INTO sources (id, name, kind, server, username, epg_urls, created_at) \
-                         VALUES (?1, ?2, 'xtream', ?3, ?4, ?5, ?6)",
-                        params![id, name, address.base, username, json_urls(&epg_urls), now_ms()],
+                        "INSERT INTO sources (id, name, kind, server, username, epg_urls, created_at, user_agent, timezone) \
+                         VALUES (?1, ?2, 'xtream', ?3, ?4, ?5, ?6, ?7, ?8)",
+                        params![id, name, address.base, username, json_urls(&epg_urls), now_ms(), user_agent, account.timezone],
                     )?;
                     if let Err(e) = self.inner.secrets.set(&password_key(&id), &password) {
                         conn.execute("DELETE FROM sources WHERE id = ?1", [&id])?;
@@ -172,6 +181,12 @@ impl Core {
             conn.execute(
                 "UPDATE sources SET user_max_connections = ?2 WHERE id = ?1",
                 params![id, limit],
+            )?;
+        }
+        if let Some(agent) = p.user_agent {
+            conn.execute(
+                "UPDATE sources SET user_agent = ?2 WHERE id = ?1",
+                params![id, clean_agent(agent)],
             )?;
         }
         if let Some(password) = p.password {
@@ -240,7 +255,7 @@ impl Core {
         match row.kind {
             SourceKind::M3u => {
                 let url = row.url.clone().unwrap_or_default();
-                let http = self.inner.http.clone();
+                let http = self.http_for(row.user_agent.as_deref())?;
                 let sid = row.id.clone();
                 let fetch =
                     async move { Ok(rows_from_m3u(&sid, fetch::playlist(&http, &url).await?)) };
@@ -501,7 +516,15 @@ pub(super) fn source_view(conn: &Connection, row: SourceRow) -> Result<Source> {
         last_refreshed: row.last_refreshed,
         status: row.status,
         error: row.error,
+        user_agent: row.user_agent,
     })
+}
+
+/// A user agent as typed: blank means Radiate's own.
+fn clean_agent(agent: Option<String>) -> Option<String> {
+    agent
+        .map(|a| a.trim().to_string())
+        .filter(|a| !a.is_empty())
 }
 
 // ---------------------------------------------------------------------------
@@ -537,6 +560,11 @@ struct ChannelRow {
     group_id: String,
     tvg_id: Option<String>,
     catchup_days: Option<u32>,
+    /// How past programmes are asked for: `xtream`, or an M3U catch-up type
+    /// (`default`, `append`, `shift`, `flussonic`, ...).
+    catchup_kind: Option<String>,
+    /// M3U `catchup-source` template.
+    catchup_source: Option<String>,
     stream: String,
     headers: Option<String>,
 }
@@ -664,6 +692,13 @@ pub(super) fn rows_from_m3u(source_id: &str, playlist: Playlist) -> PlaylistRows
                     logo: e.logo,
                     tvg_id: e.tvg_id,
                     catchup_days: e.catchup_days.filter(|d| *d > 0),
+                    catchup_kind: e
+                        .catchup
+                        .clone()
+                        .map(|k| k.trim().to_ascii_lowercase())
+                        .filter(|k| !k.is_empty())
+                        .or_else(|| e.catchup_source.as_ref().map(|_| "default".to_string())),
+                    catchup_source: e.catchup_source,
                     stream: e.url,
                     headers,
                 });
@@ -816,6 +851,8 @@ async fn rows_from_xtream(
             logo: s.icon,
             tvg_id: s.epg_channel_id,
             catchup_days: s.archive_days,
+            catchup_kind: s.archive_days.map(|_| "xtream".to_string()),
+            catchup_source: None,
             stream: format!("xt:live/{}.{ext}", s.stream_id),
             headers: None,
         });
@@ -983,8 +1020,8 @@ fn write_playlist(conn: &mut Connection, source_id: &str, rows: PlaylistRows) ->
             }
         }
         let mut insert = tx.prepare(
-            "INSERT INTO channels (id, source_id, position, number, name, logo, group_id, tvg_id, catchup_days, stream, headers, search_key) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT INTO channels (id, source_id, position, number, name, logo, group_id, tvg_id, catchup_days, stream, headers, search_key, catchup_kind, catchup_source) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         )?;
         for (i, c) in rows.channels.iter().enumerate() {
             insert.execute(params![
@@ -999,7 +1036,9 @@ fn write_playlist(conn: &mut Connection, source_id: &str, rows: PlaylistRows) ->
                 c.catchup_days,
                 c.stream,
                 c.headers,
-                search_key(&c.name)
+                search_key(&c.name),
+                c.catchup_kind,
+                c.catchup_source
             ])?;
         }
         let mut insert = tx.prepare(
@@ -1040,8 +1079,15 @@ fn write_playlist(conn: &mut Connection, source_id: &str, rows: PlaylistRows) ->
     )?;
     if let Some(a) = &rows.account {
         tx.execute(
-            "UPDATE sources SET max_connections = ?2, expires_at = ?3, output_formats = ?4 WHERE id = ?1",
-            params![source_id, a.max_connections, a.expires_at, serde_json::to_string(&a.allowed_output_formats)?],
+            "UPDATE sources SET max_connections = ?2, expires_at = ?3, output_formats = ?4, \
+             timezone = COALESCE(?5, timezone) WHERE id = ?1",
+            params![
+                source_id,
+                a.max_connections,
+                a.expires_at,
+                serde_json::to_string(&a.allowed_output_formats)?,
+                a.timezone
+            ],
         )?;
     }
     tx.commit()?;

@@ -1,6 +1,8 @@
 //! The `Core` handle: the one entry point the Tauri shell uses.
 
+mod custom;
 mod guide;
+mod import;
 mod library;
 mod search;
 mod settings;
@@ -96,6 +98,15 @@ impl Core {
             .join(format!("{label}-{}-{n}", now_ms()))
     }
 
+    /// The HTTP client for a source: the shared one, or one that sends the
+    /// source's own user agent.
+    fn http_for(&self, user_agent: Option<&str>) -> Result<reqwest::Client> {
+        match user_agent.map(str::trim).filter(|u| !u.is_empty()) {
+            Some(ua) => crate::fetch::client_with_agent(ua),
+            None => Ok(self.inner.http.clone()),
+        }
+    }
+
     fn password(&self, source_id: &str) -> Option<String> {
         self.inner.secrets.get(&password_key(source_id))
     }
@@ -114,7 +125,7 @@ impl Core {
             )
         })?;
         Ok(XtreamClient::new(
-            self.inner.http.clone(),
+            self.http_for(row.user_agent.as_deref())?,
             server,
             username,
             &password,
@@ -139,6 +150,10 @@ pub(crate) struct SourceRow {
     pub last_refreshed: Option<i64>,
     pub status: SourceStatus,
     pub error: Option<String>,
+    /// User agent the user chose for this provider (playlist, API and streams).
+    pub user_agent: Option<String>,
+    /// Xtream server time zone (IANA name), for catch-up addresses.
+    pub timezone: Option<String>,
 }
 
 impl SourceRow {
@@ -153,7 +168,7 @@ impl SourceRow {
 
 const SOURCE_COLS: &str =
     "id, name, kind, url, server, username, epg_urls, auto_epg_urls, max_connections, \
-     user_max_connections, expires_at, last_refreshed, status, error";
+     user_max_connections, expires_at, last_refreshed, status, error, user_agent, timezone";
 
 fn source_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SourceRow> {
     let json_list = |i: usize| -> rusqlite::Result<Vec<String>> {
@@ -187,6 +202,10 @@ fn source_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SourceRow> {
             _ => SourceStatus::Idle,
         },
         error: r.get(13)?,
+        user_agent: r
+            .get::<_, Option<String>>(14)?
+            .filter(|s| !s.trim().is_empty()),
+        timezone: r.get(15)?,
     })
 }
 
@@ -283,6 +302,8 @@ mod tests {
             last_refreshed: None,
             status: SourceStatus::Idle,
             error: None,
+            user_agent: None,
+            timezone: None,
         };
         assert_eq!(row.effective_limit(), Some(1));
         row.user_max_connections = None;

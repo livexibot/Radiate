@@ -17,7 +17,7 @@ use crate::{Error, Result};
 /// Columns for [`channel_row`]; expects `channels c JOIN groups g`.
 pub(super) const CHANNEL_COLS: &str =
     "c.id, c.source_id, c.number, c.name, c.logo, c.group_id, g.name, c.tvg_id, \
-     c.epg_channel_id, c.favorite, c.hidden, c.catchup_days";
+     c.epg_channel_id, c.favorite, c.hidden, CASE WHEN c.catchup_kind IS NULL THEN NULL ELSE COALESCE(c.catchup_days, 1) END";
 
 pub(super) fn channel_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Channel> {
     Ok(Channel {

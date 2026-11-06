@@ -82,6 +82,8 @@ pub struct Account {
     pub server_port: Option<u32>,
     pub server_https_port: Option<u32>,
     pub server_protocol: Option<String>,
+    /// The server's time zone (IANA name), used by its catch-up addresses.
+    pub timezone: Option<String>,
 }
 
 impl Account {
@@ -302,6 +304,23 @@ impl XtreamClient {
         )
     }
 
+    /// The archive address of a past programme on a live channel.
+    pub fn timeshift_url(
+        &self,
+        stream_id: &str,
+        w: &crate::catchup::Window,
+        tz: Option<&str>,
+    ) -> String {
+        format!(
+            "{}/timeshift/{}/{}/{}/{}/{stream_id}.ts",
+            self.base,
+            path_escape(&self.username),
+            path_escape(&self.password),
+            crate::catchup::xtream_minutes(w),
+            crate::catchup::xtream_start(w.start, tz)
+        )
+    }
+
     /// The provider's XMLTV guide URL.
     pub fn xmltv_url(&self) -> String {
         let mut url = format!("{}/xmltv.php", self.base);
@@ -360,6 +379,7 @@ pub(crate) fn parse_account(v: &Value) -> Account {
         server_port: uint(server.get("port")),
         server_https_port: uint(server.get("https_port")),
         server_protocol: text(server.get("server_protocol")),
+        timezone: text(server.get("timezone")),
     }
 }
 

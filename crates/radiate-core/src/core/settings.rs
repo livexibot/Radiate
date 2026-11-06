@@ -34,6 +34,9 @@ impl Core {
     /// Turns something to play into the upstream URL, headers and the
     /// source's effective connection limit.
     pub fn resolve(&self, t: &PlayTarget) -> Result<ResolvedStream> {
+        if let PlayTarget::Catchup { id, start, stop } = t {
+            return self.resolve_catchup(id, *start, *stop);
+        }
         let conn = self.conn();
         let (sql, id, what) = match t {
             PlayTarget::Channel { id } => ("SELECT source_id, name, stream, headers FROM channels WHERE id = ?1", id, "Channel"),
@@ -42,6 +45,7 @@ impl Core {
                 id,
                 "Movie",
             ),
+            PlayTarget::Catchup { .. } => unreachable!("handled above"),
             PlayTarget::Episode { id } => (
                 "SELECT e.source_id, v.name || ' S' || printf('%02d', e.season) || 'E' || printf('%02d', e.episode) \
                      || CASE WHEN e.title <> '' THEN ' · ' || e.title ELSE '' END, e.stream, e.headers \
@@ -92,7 +96,84 @@ impl Core {
             limit: source.effective_limit(),
             headers: parse_headers(headers),
             source_id,
-        })
+            finite: false,
+        }
+        .with_agent(source.user_agent.as_deref()))
+    }
+
+    /// A channel's programme from the provider's archive.
+    fn resolve_catchup(&self, id: &str, start: i64, stop: i64) -> Result<ResolvedStream> {
+        let conn = self.conn();
+        type Row = (
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<u32>,
+        );
+        let (source_id, name, stream, headers, kind, template, days): Row = conn
+            .query_row(
+                "SELECT source_id, name, stream, headers, catchup_kind, catchup_source, catchup_days \
+                 FROM channels WHERE id = ?1",
+                [id],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ))
+                },
+            )
+            .optional()?
+            .ok_or_else(|| Error::not_found("Channel", id))?;
+        let kind = kind
+            .ok_or_else(|| Error::Invalid("This channel doesn't keep past programmes.".into()))?;
+        let now = now_ms();
+        let days = days.unwrap_or(1).max(1) as i64;
+        if start < now - days * 86_400_000 - 3_600_000 {
+            return Err(Error::Invalid(format!(
+                "This channel keeps the last {days} {}.",
+                if days == 1 { "day" } else { "days" }
+            )));
+        }
+        if start >= now {
+            return Err(Error::Invalid("This programme hasn't started yet.".into()));
+        }
+        let source = load_source(&conn, &source_id)?;
+        drop(conn);
+        let w = crate::catchup::Window {
+            start: start / 1000,
+            stop: stop.max(start + 60_000) / 1000,
+            now: now / 1000,
+        };
+        let upstream_url = if kind == "xtream" {
+            let file = stream.strip_prefix("xt:live/").ok_or_else(|| {
+                Error::Invalid("This channel doesn't keep past programmes.".into())
+            })?;
+            let stream_id = file.split('.').next().unwrap_or(file);
+            self.xtream_client(&source)?
+                .timeshift_url(stream_id, &w, source.timezone.as_deref())
+        } else {
+            crate::catchup::m3u_url(&kind, template.as_deref(), &stream, &w).ok_or_else(|| {
+                Error::Invalid("This playlist doesn't say how to play past programmes.".into())
+            })?
+        };
+        Ok(ResolvedStream {
+            kind_hint: StreamKind::from_url(&upstream_url),
+            upstream_url,
+            title: name,
+            limit: source.effective_limit(),
+            headers: parse_headers(headers),
+            source_id,
+            finite: true,
+        }
+        .with_agent(source.user_agent.as_deref()))
     }
 
     /// Asks the provider how many connections the account uses right now

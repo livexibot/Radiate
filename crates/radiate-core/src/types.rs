@@ -58,6 +58,8 @@ pub struct Source {
     pub status: SourceStatus,
     /// Plain-language message for the last failure.
     pub error: Option<String>,
+    /// User agent sent to this provider, when the user chose one.
+    pub user_agent: Option<String>,
 }
 
 /// Input for adding a source.
@@ -74,6 +76,8 @@ pub enum NewSource {
         url: String,
         #[serde(default)]
         epg_urls: Vec<String>,
+        #[serde(default)]
+        user_agent: Option<String>,
     },
     Xtream {
         name: String,
@@ -82,7 +86,27 @@ pub enum NewSource {
         password: String,
         #[serde(default)]
         epg_urls: Vec<String>,
+        #[serde(default)]
+        user_agent: Option<String>,
     },
+}
+
+/// A stream the user added by its address ("My channels").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomChannel {
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub group: Option<String>,
+    #[serde(default)]
+    pub logo: Option<String>,
+    #[serde(default)]
+    pub user_agent: Option<String>,
+    #[serde(default)]
+    pub referrer: Option<String>,
+    #[serde(default)]
+    pub origin: Option<String>,
 }
 
 /// Changes to a source. Missing fields stay as they are.
@@ -100,6 +124,9 @@ pub struct SourcePatch {
     /// passwords. Stored in the secret store, never in the database.
     #[serde(default, skip_serializing)]
     pub password: Option<String>,
+    /// `Some(None)` goes back to Radiate's own user agent.
+    #[serde(default, deserialize_with = "double_option")]
+    pub user_agent: Option<Option<String>>,
 }
 
 fn double_option<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
@@ -347,9 +374,22 @@ mod pairs {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum PlayTarget {
-    Channel { id: String },
-    Movie { id: String },
-    Episode { id: String },
+    Channel {
+        id: String,
+    },
+    Movie {
+        id: String,
+    },
+    Episode {
+        id: String,
+    },
+    /// A channel's past (or current) programme from the provider's archive.
+    /// `start` and `stop` are Unix ms.
+    Catchup {
+        id: String,
+        start: i64,
+        stop: i64,
+    },
 }
 
 /// Everything the relay needs to open a stream.
@@ -364,6 +404,25 @@ pub struct ResolvedStream {
     pub limit: Option<u32>,
     /// Extra request headers from the playlist (User-Agent, Referer, Origin).
     pub headers: Vec<(String, String)>,
+    /// A recording with an end (catch-up), not a live stream.
+    pub finite: bool,
+}
+
+impl ResolvedStream {
+    /// Adds the source's user agent unless the playlist set one for this
+    /// stream.
+    pub fn with_agent(mut self, agent: Option<&str>) -> Self {
+        if let Some(agent) = agent.map(str::trim).filter(|a| !a.is_empty()) {
+            let has = self.headers.iter().any(|(k, _)| {
+                let k = k.to_ascii_lowercase();
+                k == "user-agent" || k == "http-user-agent"
+            });
+            if !has {
+                self.headers.push(("User-Agent".into(), agent.to_string()));
+            }
+        }
+        self
+    }
 }
 
 /// Container or protocol of a stream.
@@ -504,7 +563,8 @@ mod tests {
             NewSource::M3u {
                 name: "A".into(),
                 url: "/x.m3u".into(),
-                epg_urls: vec!["g".into()]
+                epg_urls: vec!["g".into()],
+                user_agent: None,
             }
         );
         let xt: NewSource = serde_json::from_value(

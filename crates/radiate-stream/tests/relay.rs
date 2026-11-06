@@ -245,6 +245,7 @@ fn req(source: &str, url: String, limit: Option<u32>) -> OpenRequest {
         limit,
         provider_in_use: None,
         title: "Test".into(),
+        finite: false,
     }
 }
 

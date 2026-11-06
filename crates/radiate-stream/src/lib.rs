@@ -81,6 +81,10 @@ pub struct OpenRequest {
     /// included. `None` when the provider doesn't say.
     pub provider_in_use: Option<u32>,
     pub title: String,
+    /// A recording with an end (catch-up of a past programme): an MPEG-TS
+    /// that ends is finished, not dropped, so it isn't reconnected.
+    #[serde(default)]
+    pub finite: bool,
 }
 
 /// An open relay session.

@@ -195,6 +195,15 @@ ALTER TABLE vod ADD COLUMN search_key TEXT NOT NULL DEFAULT '';
 DROP TABLE channels_fts;
 DROP TABLE vod_fts;
 "#,
+    // 0.7.0: a user agent per source (some providers only answer known
+    // players), how a channel's past programmes are asked for (catch-up),
+    // and the Xtream server's time zone (its catch-up addresses use it).
+    r#"
+ALTER TABLE sources ADD COLUMN user_agent TEXT;
+ALTER TABLE sources ADD COLUMN timezone TEXT;
+ALTER TABLE channels ADD COLUMN catchup_kind TEXT;
+ALTER TABLE channels ADD COLUMN catchup_source TEXT;
+"#,
 ];
 
 /// The migration that added `search_key`.

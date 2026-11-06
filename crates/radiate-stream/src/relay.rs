@@ -95,6 +95,8 @@ pub(crate) struct Session {
     /// Whether a request has gone to the provider.
     dialed: AtomicBool,
     pub(crate) convert: Mutex<ConvertState>,
+    /// See [`crate::OpenRequest::finite`].
+    finite: bool,
 }
 
 impl Session {
@@ -158,6 +160,7 @@ impl Session {
             waiting_since: AtomicU64::new(0),
             dialed: AtomicBool::new(false),
             convert: Mutex::new(ConvertState::default()),
+            finite: req.finite,
         }
     }
 
@@ -704,7 +707,7 @@ async fn serve(
                 .get(header::ACCEPT_RANGES)
                 .and_then(|v| v.to_str().ok())
                 == Some("bytes"));
-    let reconnect = is_root && s.kind() == StreamKind::MpegTs;
+    let reconnect = is_root && s.kind() == StreamKind::MpegTs && !s.finite;
 
     let mut up = up;
     if !is_root {

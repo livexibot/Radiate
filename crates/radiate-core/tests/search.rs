@@ -52,6 +52,7 @@ async fn library() -> (tempfile::TempDir, Core) {
             name: "List".into(),
             url: path.to_string_lossy().into_owned(),
             epg_urls: vec![],
+            user_agent: None,
         },
         quiet,
     )

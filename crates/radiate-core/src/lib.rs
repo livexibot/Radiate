@@ -1,12 +1,14 @@
 //! Radiate's data library: sources, parsers, the SQLite index, the guide
 //! and preferences.
 
+pub mod catchup;
 mod core;
 mod db;
 mod error;
 mod fetch;
 pub mod m3u;
 mod matching;
+pub mod opentv;
 mod secrets;
 mod text;
 mod types;

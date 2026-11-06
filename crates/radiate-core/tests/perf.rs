@@ -48,6 +48,7 @@ async fn indexes_50k_playlist_quickly() {
                 name: "Big".into(),
                 url: path.to_string_lossy().into_owned(),
                 epg_urls: vec![],
+                user_agent: None,
             },
             quiet,
         )
@@ -200,6 +201,7 @@ async fn ingests_200k_programmes_with_bounded_memory() {
                 name: "Guide test".into(),
                 url: playlist.to_string_lossy().into_owned(),
                 epg_urls: vec![guide.to_string_lossy().into_owned()],
+                user_agent: None,
             },
             quiet,
         )

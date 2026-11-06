@@ -140,6 +140,7 @@ fn open(hub: &StreamHub, url: String, kind: StreamKind) -> String {
         limit: Some(1),
         provider_in_use: None,
         title: "Test".into(),
+        finite: false,
     })
     .unwrap()
     .id

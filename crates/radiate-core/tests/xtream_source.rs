@@ -52,6 +52,7 @@ async fn xtream_account_end_to_end() {
                 username: "demo".into(),
                 password: "wrong".into(),
                 epg_urls: vec![],
+                user_agent: None,
             },
             quiet,
         )
@@ -73,6 +74,7 @@ async fn xtream_account_end_to_end() {
                 username: "".into(),
                 password: "".into(),
                 epg_urls: vec![],
+                user_agent: None,
             },
             quiet,
         )
@@ -330,6 +332,7 @@ async fn a_failed_first_refresh_is_kept_on_the_source() {
                 username: "demo".into(),
                 password: "demo-pass".into(),
                 epg_urls: vec![],
+                user_agent: None,
             },
             quiet,
         )
