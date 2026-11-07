@@ -879,7 +879,8 @@ class Run:
             return
         video_id = "abcDEF12_-x"
         self.s.invoke("prefs_set", {"patch": {
-            "playInMpv": True, "liveFormat": "ts", "latency": "normal",
+            "playInMpv": True, "mpvArgs": "--vo=x11",  # Xvfb has no GL; x11 has a window id
+            "liveFormat": "ts", "latency": "normal",
             "reactors": [{"id": "rtest", "name": "Test Reactor", "url": f"https://youtu.be/{video_id}", "kind": "video", "videoId": video_id, "channelId": None}],
             "reactorOverlay": {"size": "m", "side": "left", "volume": 60, "delay": 5},
         }})
@@ -928,14 +929,43 @@ class Run:
             self.shot("mpv-card")
         finally:
             ipc.close()
-        # Reactors float over mpv in windows of their own; R in mpv shows them, and the delay
+        # Reactors sit inside mpv's window in windows of their own; R in mpv shows them, and the delay
         # goes back through what mpv has already received
         ipc = MpvIpc(mpv_socket())  # type: ignore[arg-type]
         try:
             time.sleep(6)  # some of the channel in mpv's cache to go back through
             ipc.cmd("keypress", "r")
             box = self.s.wait("reactor window", lambda: self.x_window("Test Reactor"), timeout=15)
-            r.ok(box["w"] >= 160 and box["h"] >= 90, f"R in mpv opens the reactor in a window of its own over mpv ({box['w']}x{box['h']} at {box['x']},{box['y']})")
+            wid = int(ipc.cmd("get_property", "window-id"))  # type: ignore[arg-type]
+            mpv_at = self.x_window_id(wid)
+
+            def inside(b: dict | None, m: dict | None) -> bool:
+                return bool(b and m) and m["x"] <= b["x"] and m["y"] <= b["y"] and b["x"] + b["w"] <= m["x"] + m["w"] and b["y"] + b["h"] <= m["y"] + m["h"]  # type: ignore[index]
+
+            def share(b: dict, m: dict) -> tuple[float, ...]:
+                return (round((b["x"] - m["x"]) / m["w"], 3), round((b["y"] - m["y"]) / m["h"], 3), round(b["w"] / m["w"], 3), round(b["h"] / m["h"], 3))
+
+            box = self.s.wait("reactor in mpv's picture", lambda: (b := self.x_window("Test Reactor")) and inside(b, mpv_at) and b, timeout=10)
+            r.ok(inside(box, mpv_at), f"R in mpv opens the reactor inside mpv's window ({box['w']}x{box['h']} at {box['x']},{box['y']}; mpv {mpv_at})")
+            was = share(box, mpv_at)  # type: ignore[arg-type]
+            # mpv's window moves and grows: the reactor goes with it and keeps its place on the picture
+            subprocess.run(["xdotool", "windowmove", str(wid), "40", "30"], env={**os.environ, "DISPLAY": f":{self.args.display}"}, check=False)
+            subprocess.run(["xdotool", "windowsize", str(wid), "1500", "844"], env={**os.environ, "DISPLAY": f":{self.args.display}"}, check=False)
+            moved = self.s.wait("mpv moved", lambda: (m := self.x_window_id(wid)) and m["x"] == 40 and m["w"] == 1500 and m, timeout=10)
+            follows = self.s.wait("reactor follows", lambda: (b := self.x_window("Test Reactor")) and inside(b, moved) and all(abs(a - c) < 0.01 for a, c in zip(share(b, moved), was)) and b, timeout=5)
+            r.ok(bool(follows), f"moving and resizing mpv's window takes the reactor along, same place on the picture ({was} -> {share(follows, moved)})")
+            # minimised (unmapped) with mpv, and back
+            subprocess.run(["xdotool", "windowunmap", str(wid)], env={**os.environ, "DISPLAY": f":{self.args.display}"}, check=False)
+            gone = self.s.wait("reactor hidden", lambda: not self.x_window("Test Reactor"), timeout=5)
+            subprocess.run(["xdotool", "windowmap", str(wid)], env={**os.environ, "DISPLAY": f":{self.args.display}"}, check=False)
+            back = self.s.wait("reactor back", lambda: self.x_window("Test Reactor"), timeout=5)
+            r.ok(bool(gone and back), "hiding mpv's window hides the reactor, and it comes back with it")
+            # moved past mpv's right edge, it comes back inside, and that place is kept
+            box_id = subprocess.run(["xdotool", "search", "--name", "Test Reactor"], env={**os.environ, "DISPLAY": f":{self.args.display}"}, capture_output=True, text=True).stdout.split()[0]
+            subprocess.run(["xdotool", "windowmove", box_id, str(moved["x"] + moved["w"] - 100), str(moved["y"] + 100)], env={**os.environ, "DISPLAY": f":{self.args.display}"}, check=False)
+            kept = self.s.wait("back inside", lambda: (b := self.x_window("Test Reactor")) and inside(b, moved) and b["x"] + b["w"] >= moved["x"] + moved["w"] - 2 and b, timeout=5)
+            saved = self.s.wait("place saved", lambda: (f := ((self.s.invoke("prefs_get", {}) or {}).get("reactorOverlay", {}).get("views", {}).get("rtest", {}) or {}).get("float")) and f["x"] > 0.6 and f, timeout=5)  # type: ignore[union-attr]
+            r.ok(bool(kept and saved), f"a reactor moved past mpv's edge comes back inside it, and the place is kept as shares of the picture ({saved})")
             behind = self.s.wait("held back", lambda: (c := ipc.cmd("get_property", "demuxer-cache-time")) and (t := ipc.cmd("get_property", "time-pos")) and c - t >= 4 and round(c - t, 1), timeout=15)
             r.ok(True, f"the reactor's 5 s delay goes back through mpv's buffer: {behind} s behind what has arrived")
             self.xshot("mpv-reactor")
@@ -1038,7 +1068,7 @@ class Run:
         self.go("settings")
         self.s.wait("streams closed", lambda: self.in_use()[0] == 0, timeout=15)
         r.ok(True, "leaving multiview closes mpv and every tile's stream")
-        self.s.invoke("prefs_set", {"patch": {"playInMpv": False, "reactorOverlay": {"size": "m", "side": "left", "volume": 80, "delay": 0}}})
+        self.s.invoke("prefs_set", {"patch": {"playInMpv": False, "mpvArgs": "", "reactorOverlay": {"size": "m", "side": "left", "volume": 80, "delay": 0}}})
 
     def x_window(self, name: str) -> dict | None:
         """An X window by its title: where it is and its size."""
@@ -1048,9 +1078,17 @@ class Run:
                 m = re.search(r"(\d+)x(\d+)\+(-?\d+)\+(-?\d+)\s+\+(-?\d+)\+(-?\d+)", line)
                 if m:
                     w, h, _, _, x, y = (int(v) for v in m.groups())
-                    if w > 1 and h > 1:
+                    shown = "IsViewable" in subprocess.run(["xwininfo", "-id", line.split()[0], "-display", f":{self.args.display}"], capture_output=True, text=True).stdout
+                    if w > 1 and h > 1 and shown:
                         return {"w": w, "h": h, "x": x, "y": y}
         return None
+
+    def x_window_id(self, wid: int) -> dict | None:
+        """An X window by its id: where it is on the screen and its size."""
+        out = subprocess.run(["xwininfo", "-id", str(wid), "-display", f":{self.args.display}"], capture_output=True, text=True).stdout
+        v = {k: int(m.group(1)) for k, pat in (("x", "Absolute upper-left X"), ("y", "Absolute upper-left Y"), ("w", "Width"), ("h", "Height"))
+             if (m := re.search(pat + r":\s+(-?\d+)", out))}
+        return v if len(v) == 4 and "IsViewable" in out else None
 
     def xshot(self, name: str) -> None:
         """The whole screen (mpv's own window is outside the webview)."""

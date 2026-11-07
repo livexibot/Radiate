@@ -19,10 +19,10 @@ AppImage, `.deb` or `.rpm` for Linux. Radiate updates itself after that.
   starting soon, from your favorites and every sports group. Live and the
   guide have a Sports view, and you choose which groups count as sports.
 - **Watch with reactors.** Save YouTube reactors by link, then show up to
-  four at once, each in a box of its own over the match in mpv (R): drag
-  them anywhere, resize them to any shape by their corners and edges.
-  Each box has its own volume and mute, opens where you left it, and stays
-  on top of everything else. If the reactors are behind your feed, delay
+  four at once, each in a box inside mpv's window (R): drag them anywhere
+  on the picture and resize them to any shape by their corners and edges.
+  They move, resize, go full screen and minimise with mpv, keep their place
+  on the picture, and each has its own volume and mute. If the reactors are behind your feed, delay
   the match a few seconds to line them up: it goes back through what has
   already loaded instead of pausing. It's YouTube's own player; a video
   that doesn't allow other apps opens on youtube.com in its own window

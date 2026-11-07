@@ -337,7 +337,7 @@ messages back up as `{ radiate: "yt", data }`.
 | `mpv_message` | `{ text }` | shows a line on mpv's picture |
 | `mpv_multiview` | `{ tiles: (string \| null)[], names: string[], layout: "2x2" \| "1+3", focus }` | plays the tiles' relay URLs together in the mpv window (only `http://127.0.0.1:` URLs) |
 | `mpv_multiview_focus` | `{ focus }` | moves Multiview's highlight and sound to that tile |
-| `reactor_float_open` | `{ id, title, rect, screen? }` | opens the reactor's box over mpv (`rbox-<id>`): at `screen` (logical screen pixels), else over `rect` (CSS pixels of the main window); shows it if it is open |
+| `reactor_float_open` | `{ id, title, place, saved? }` | opens the reactor's box in mpv's window (`rbox-<id>`): at `saved`, else at `place`; both are shares of mpv's picture `{ x, y, w, h }` (0..1). The box follows mpv's window |
 | `reactor_float_close` | `{ id? }` | closes the reactor's box, or without an id all of them |
 | `app_info` | | `{ version, dataDir }` |
 | `youtube_resolve` | `{ url }` | `{ kind: "video" \| "channel", videoId, channelId, title }` (handles like `@name` are looked up on youtube.com) |
@@ -369,7 +369,7 @@ in the mpv window, `zap` with -1 or 1, `number`, `previous`, `record` or `reacto
 `time` ("pos dur" in seconds, every 2 s), `pause` (1 or 0) and `ended` for movies;
 `mv-focus`, `mv-promote` and `mv-move` (an arrow key) in Multiview), `mpv-closed`
 (`{ sessionId }`: the mpv window closed), `reactor-float-moved` (`{ id, x, y, w, h }`,
-logical screen pixels) and `reactor-float-closed` (`{ id }`) from the reactor boxes to the
+shares of mpv's picture) and `reactor-float-closed` (`{ id }`) from the reactor boxes to the
 main window, `reactor-view` (`{ id, volume, muted }`, main window to the boxes) and
 `reactor-float-action` (`{ id, action: "close" | "mute" }`, a box to the main window).
 

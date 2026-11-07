@@ -3352,7 +3352,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "radiate-core"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -3374,9 +3374,11 @@ dependencies = [
 
 [[package]]
 name = "radiate-desktop"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "chrono",
+ "gdkx11",
+ "gtk",
  "keyring",
  "radiate-core",
  "radiate-stream",
@@ -3396,11 +3398,13 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "windows-sys 0.61.2",
+ "x11",
 ]
 
 [[package]]
 name = "radiate-stream"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "axum",
  "bytes",

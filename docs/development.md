@@ -230,6 +230,20 @@ page.
   open-tv's, is preferred. macOS and Linux use the system's mpv; without
   one, channels play in Radiate.
 
+## Decisions (7 November 2026, 0.9.1)
+
+- The owner wants the reactors inside mpv's window, not in Radiate's. The
+  boxes stay Radiate windows with YouTube's own player (mpv doesn't decode
+  YouTube: that would need yt-dlp, which the reactor rule rules out), but
+  they belong to mpv's window: Radiate's script reports mpv's `window-id`;
+  on Windows each box is owned by that window (and doesn't take the
+  keyboard), on X11 it is transient for it. Radiate follows mpv's picture
+  (about 30 times a second) and places each box by its share of the
+  picture, so boxes move, resize, go full screen and minimise with mpv and
+  can't be left outside it. Places are saved as shares
+  (`reactorOverlay.views[id].float`). Without a window id (macOS, Wayland,
+  an old mpv) the boxes stay on top of the screen instead.
+
 ## Decisions (7 November 2026, 0.9.0)
 
 - The owner wants mpv as the only player, with Radiate's extras on top.

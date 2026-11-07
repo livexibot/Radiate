@@ -84,7 +84,7 @@ function viewsOf(v: unknown, volume: number): Record<string, ReactorView> {
   return out;
 }
 
-/** Where a reactor's own window was left over mpv, on the screen (logical pixels). */
+/** Where a reactor's box was left in mpv's window, as shares of mpv's picture (0..1 from its top left). */
 export interface FloatRect {
   x: number;
   y: number;
@@ -96,8 +96,9 @@ export function floatOf(b: unknown): FloatRect | null {
   if (!b || typeof b !== "object") return null;
   const { x, y, w, h } = b as Record<string, unknown>;
   const ok = (v: unknown, lo: number, hi: number) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi;
-  if (!ok(x, -20000, 20000) || !ok(y, -20000, 20000) || !ok(w, 120, 8000) || !ok(h, 68, 8000)) return null;
-  return { x: Math.round(x as number), y: Math.round(y as number), w: Math.round(w as number), h: Math.round(h as number) };
+  if (!ok(x, 0, 1) || !ok(y, 0, 1) || !ok(w, 0.01, 1) || !ok(h, 0.01, 1)) return null;
+  const r = (v: unknown) => Math.round((v as number) * 10000) / 10000;
+  return { x: r(x), y: r(y), w: r(w), h: r(h) };
 }
 
 function boxOf(b: unknown): BoxPrefs | null {

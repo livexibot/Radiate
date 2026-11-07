@@ -518,6 +518,11 @@ async fn spawn(
                     }
                     continue;
                 }
+                if args.first() == Some(&"radiate") && args.get(1) == Some(&"window") {
+                    let id = args.get(2).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+                    crate::float::set_parent(&app_ipc, id);
+                    continue;
+                }
                 if args.first() == Some(&"radiate") && args.len() >= 2 {
                     let _ = app_ipc.emit(
                         "mpv-command",
@@ -550,6 +555,7 @@ async fn spawn(
                 }
             };
             if let Some(w) = gone {
+                crate::float::set_parent(&app2, 0);
                 if !w.session_id.is_empty() {
                     state.hub.close(&w.session_id);
                 }

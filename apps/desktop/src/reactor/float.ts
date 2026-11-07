@@ -1,7 +1,8 @@
 /**
- * Reactors over mpv. mpv is a window of its own, so each reactor shown over it is a small window
- * of Radiate's (`#reactorbox/<id>`) that stays on top. The main window opens and closes them and
- * keeps their sound and place in prefs; the boxes tell it when they are moved, muted or closed.
+ * Reactors in mpv's window. Each reactor is a small window of Radiate's (`#reactorbox/<id>`) that
+ * belongs to mpv's window and follows it (src-tauri/src/float.rs). The main window opens and closes
+ * them and keeps their sound and place (shares of mpv's picture) in prefs; the boxes tell it when
+ * they are moved, muted or closed.
  */
 import { isTauri } from "../api";
 import { ApiError } from "../api/errors";
@@ -22,9 +23,9 @@ export function floatId(hash: string): string | null {
   return m ? m[1]! : null;
 }
 
-/** Opens a reactor's window: where it was left, else over `rect` (CSS pixels of Radiate's window). */
-export async function openFloat(id: string, title: string, rect: FloatRect, screen: FloatRect | null): Promise<void> {
-  if (isTauri) await invoke<void>("reactor_float_open", { id, title, rect, screen });
+/** Opens a reactor's box in mpv's window: where it was left (`saved`), else at `place`; both are shares of mpv's picture. */
+export async function openFloat(id: string, title: string, place: FloatRect, saved: FloatRect | null): Promise<void> {
+  if (isTauri) await invoke<void>("reactor_float_open", { id, title, place, saved });
 }
 
 export async function closeFloat(id?: string): Promise<void> {

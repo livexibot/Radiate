@@ -62,8 +62,10 @@ limit card; a stream reported on another device does, the card checks again
 by itself, and Play anyway asks the provider), `stall` (a frozen live picture
 becomes the failure card), `mpv` (needs `mpv` installed: a channel opens in mpv on the
 relay; Up / Down, a typed number and Backspace sent to mpv's IPC change channel in the same
-window on one connection; R opens the reactor's own box over mpv and the delay holds the
-match back on the same connection, R again closes it; closing mpv and Stop; a movie plays in
+window on one connection; R opens the reactor's box inside mpv's window, which follows mpv
+when it moves, grows and is hidden, comes back inside when moved past its edge and keeps that
+place; the delay holds the match back on the same connection, R again closes it (mpv runs with
+`--vo=x11` here for its window id); closing mpv and Stop; a movie plays in
 mpv, its progress is saved and it resumes there; Multiview plays its tiles in one mpv with an
 xstack, one connection per tile, arrows move the focus and Back closes everything.
 `run/mpv-banner.png`, `run/mpv-reactor.png` and `run/mpv-multiview.png` are the whole

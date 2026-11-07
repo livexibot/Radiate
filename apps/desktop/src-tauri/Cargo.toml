@@ -35,3 +35,11 @@ keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync
 tracing = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+gdkx11 = "0.18"
+x11 = { version = "2.21", features = ["xlib"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }

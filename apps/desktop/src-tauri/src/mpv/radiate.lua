@@ -597,6 +597,14 @@ mp.observe_property("osd-dimensions", "native", function()
 end)
 
 -- Radiate asks until this script is loaded, then sends what it has queued.
+-- mpv's window, so Radiate can put the reactors in it.
+local function send_window()
+  local id = mp.get_property_native("window-id")
+  send("window", id and string.format("%d", id) or "0")
+end
+mp.observe_property("window-id", "native", send_window)
+
 mp.register_script_message("radiate-hello", function()
   send("ready")
+  send_window()
 end)

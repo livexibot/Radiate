@@ -263,7 +263,7 @@ export function Player({ route }: { route: PlayerRoute }) {
   }, [shown.length, reactors.reactors, showReactors]);
   const laidOut = useMemo(() => (shown.length && area.w > 0 && area.h > 0 ? layoutBoxes(shown.map((r) => r.id), reactors.overlay, area.w, area.h) : []), [shown, reactors.overlay, area.w, area.h]);
 
-  // Over mpv, each reactor is a small window of its own that stays on top of mpv's picture.
+  // In mpv, each reactor is a small window of its own inside mpv's window.
   const floating = mpvMode && isChannel;
   const opened = useRef<Set<string>>(new Set());
   const reactorsRef = useRef(reactors);
@@ -281,12 +281,13 @@ export function Player({ route }: { route: PlayerRoute }) {
       if (opened.current.has(r.id) || !box) return;
       opened.current.add(r.id);
       const v = viewOf(reactorsRef.current.overlay, r.id);
-      openFloat(r.id, r.name, box, v.float ?? null).catch((e) => {
+      const place = { x: box.x / area.w, y: box.y / area.h, w: box.w / area.w, h: box.h / area.h };
+      openFloat(r.id, r.name, place, v.float ?? null).catch((e) => {
         opened.current.delete(r.id);
         toast(errorMessage(e), "bad");
       });
     });
-  }, [floating, shown, laidOut, toast]);
+  }, [floating, shown, laidOut, area.w, area.h, toast]);
   useEffect(() => {
     if (!floating) return;
     const was = opened.current;
