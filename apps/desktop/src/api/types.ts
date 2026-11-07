@@ -405,7 +405,7 @@ export interface Commands {
   mpv_available: [undefined, boolean];
   mpv_open: [{ target: PlayTarget }, MpvStarted];
   app_info: [undefined, AppInfo];
-  opentv_find: [undefined, OpenTvSummary | null];
+  opentv_find: [{ path?: string | null }, OpenTvSummary | null];
   opentv_import: [{ path?: string | null }, ImportReport];
   custom_channels_get: [undefined, CustomChannel[]];
   custom_channels_set: [{ list: CustomChannel[] }, Source | null];

@@ -3,6 +3,7 @@ import { useNow } from "../state/hooks";
 import { useAppearance } from "../plugins/host";
 import { useApp, type Route } from "../state/app";
 import { UpdatePill } from "../updater";
+import { useRecordings } from "../state/recordings";
 import { Icon, type IconName } from "./Icon";
 
 interface Item {
@@ -61,12 +62,26 @@ export function TopBar() {
         ))}
       </nav>
       <div className="appbar-end">
+        <RecPill />
         <UpdatePill />
         <span className="appbar-clock num" aria-label={`Time ${clock(now)}`}>
           {clock(now)}
         </span>
       </div>
     </header>
+  );
+}
+
+/** Shown while anything records; opens Settings › Recordings. */
+function RecPill() {
+  const { navigate } = useApp();
+  const running = useRecordings();
+  if (!running.length) return null;
+  return (
+    <button type="button" className="rec-pill" title={running.map((r) => r.title).join(", ")} onClick={() => navigate({ name: "settings", section: "recordings" })}>
+      <span className="rec-dot" aria-hidden />
+      REC{running.length > 1 ? <span className="num"> {running.length}</span> : null}
+    </button>
   );
 }
 
@@ -101,6 +116,7 @@ function SideRail() {
         ))}
       </nav>
       <div className="apprail-end">
+        <RecPill />
         <UpdatePill />
         <span className="appbar-clock num" aria-label={`Time ${clock(now)}`}>
           {clock(now)}

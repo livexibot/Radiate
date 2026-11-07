@@ -349,3 +349,6 @@ input[type="range"] { accent-color: var(--c-accent); }
 @media (max-width: 1080px) {
   .appbar-item .icon { display: none; }
 }
+
+.rec-pill { display: inline-flex; align-items: center; gap: 0.4rem; height: 1.9rem; padding: 0 0.7rem; border: 0; border-radius: 999px; background: rgba(239, 68, 68, 0.14); color: var(--c-text); font-size: var(--fs-2xs); font-weight: var(--fw-black); letter-spacing: 0.06em; cursor: pointer; }
+.rec-pill:hover { background: rgba(239, 68, 68, 0.24); }

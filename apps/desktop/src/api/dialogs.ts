@@ -20,3 +20,11 @@ export async function pickSaveFile(defaultPath: string, filters: FileFilter[]): 
   const picked = await save({ defaultPath, filters });
   return picked ?? null;
 }
+
+/** Native folder picker. Returns null when cancelled. */
+export async function pickFolder(): Promise<string | null> {
+  if (!isTauri) return "/home/demo/Videos/Radiate";
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const picked = await open({ multiple: false, directory: true });
+  return typeof picked === "string" ? picked : null;
+}

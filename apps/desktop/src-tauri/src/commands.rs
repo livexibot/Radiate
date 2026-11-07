@@ -538,12 +538,16 @@ pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> CmdResult<A
 // ---------------------------------------------------------------------------
 // Moving in from open-tv, and My channels
 
-/// open-tv's library on this computer, if there is one (no passwords).
+/// open-tv's library on this computer (or the file the user picked), if there is one. No passwords.
 #[tauri::command]
 pub async fn opentv_find(
     state: State<'_, AppState>,
+    path: Option<String>,
 ) -> CmdResult<Option<radiate_core::opentv::OtSummary>> {
-    blocking(&state.core, |c| match radiate_core::opentv::find() {
+    let path = path
+        .map(std::path::PathBuf::from)
+        .or_else(radiate_core::opentv::find);
+    blocking(&state.core, move |c| match path {
         Some(path) => c.opentv_summary(&path).map(Some),
         None => Ok(None),
     })

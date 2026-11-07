@@ -26,7 +26,7 @@ export type Route =
 
 export type LibraryTab = "movie" | "series";
 
-export type SettingsSection = "sources" | "channels" | "playback" | "appearance" | "reactors" | "backup" | "about";
+export type SettingsSection = "sources" | "channels" | "playback" | "recordings" | "appearance" | "reactors" | "backup" | "about";
 
 export interface Toast {
   id: number;

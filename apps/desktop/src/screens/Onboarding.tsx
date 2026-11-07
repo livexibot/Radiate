@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, errorMessage, type Group, type NewSource, type Progress as ProgressEvt, type Source } from "../api";
+import { api, errorMessage, type Group, type NewSource, type OpenTvSummary, type Progress as ProgressEvt, type Source } from "../api";
 import { pickOpenFile } from "../api/dialogs";
 import { Icon } from "../components/Icon";
 import { Progress } from "../components/Progress";
 import { Skeleton } from "../components/Skeleton";
 import { COUNTRIES, publicCatalogUrl } from "../lib/countries";
 import { useApp } from "../state/app";
+import { findOpenTv, OpenTvImport } from "./OpenTvImport";
 
 type Kind = "m3u" | "xtream" | "free";
-type Step = "choose" | "form" | "progress" | "groups";
+type Step = "choose" | "form" | "progress" | "groups" | "opentv";
 
 const PHASES: { id: string; label: string }[] = [
   { id: "playlist", label: "Channels" },
@@ -31,6 +32,10 @@ export function Onboarding({ firstRun }: { firstRun: boolean }) {
   const [source, setSource] = useState<Source | null>(null);
   const [phase, setPhase] = useState<ProgressEvt | null>(null);
   const [donePhases, setDonePhases] = useState<Set<string>>(new Set());
+  const [opentv, setOpentv] = useState<OpenTvSummary | null>(null);
+  useEffect(() => {
+    void findOpenTv(false).then(setOpentv);
+  }, []);
 
   const finish = async () => {
     if (!prefs?.onboarded) await setPrefs({ onboarded: true });
@@ -73,10 +78,10 @@ export function Onboarding({ firstRun }: { firstRun: boolean }) {
     <div className="ob">
       <div className="ob-l">
         <div className="brand-mark lg">R</div>
-        <h1>{step === "groups" ? "Pick your groups" : step === "progress" ? "Loading your source" : "Add a source"}</h1>
+        <h1>{step === "groups" ? "Pick your groups" : step === "progress" ? "Loading your source" : step === "opentv" ? "Moving in" : "Add a source"}</h1>
         <ol className="ob-steps">
           {["Source", "Loading", "Groups"].map((label, i) => {
-            const at = step === "choose" || step === "form" ? 0 : step === "progress" ? 1 : 2;
+            const at = step === "choose" || step === "form" ? 0 : step === "progress" || step === "opentv" ? 1 : 2;
             return (
               <li key={label} className={i < at ? "done" : i === at ? "on" : ""}>
                 <span className="ob-step-dot">{i < at ? <Icon name="check" /> : i + 1}</span>
@@ -94,6 +99,18 @@ export function Onboarding({ firstRun }: { firstRun: boolean }) {
       <div className="ob-r">
         {step === "choose" ? (
           <div className="ob-options">
+            {opentv ? (
+              <button type="button" className="src-opt opentv" onClick={() => setStep("opentv")}>
+                <span className="src-ico">OTV</span>
+                <span className="src-name">
+                  Move in from open-tv
+                  <span className="mute src-sub">
+                    {opentv.sources.length} {opentv.sources.length === 1 ? "source" : "sources"} · {opentv.favorites} favorites
+                  </span>
+                </span>
+                <Icon name="right" />
+              </button>
+            ) : null}
             {OPTIONS.map((o) => (
               <button
                 type="button"
@@ -137,6 +154,7 @@ export function Onboarding({ firstRun }: { firstRun: boolean }) {
             })}
           </div>
         ) : null}
+        {step === "opentv" && opentv ? <OpenTvImport summary={opentv} onBack={() => setStep("choose")} onDone={(r) => (r.added.length || !firstRun ? void finish() : setStep("choose"))} /> : null}
         {step === "groups" && source ? <GroupPicker source={source} onDone={() => void finish()} /> : null}
       </div>
     </div>

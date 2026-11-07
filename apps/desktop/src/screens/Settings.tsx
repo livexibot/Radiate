@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, errorMessage, type AppInfo, type Channel, type Group, type Source } from "../api";
+import { api, errorMessage, type AppInfo, type Channel, type Group, type OpenTvSummary, type Source } from "../api";
 import { pickOpenFile, pickSaveFile } from "../api/dialogs";
 import { Empty } from "../components/Empty";
 import { Icon } from "../components/Icon";
@@ -15,11 +15,16 @@ import { ReactorList } from "../reactor/ReactorList";
 import { UpdateSection } from "../updater";
 import { AppearanceSection } from "./AppearanceSection";
 import { EpgMatchPicker } from "./EpgMatchPicker";
+import { findOpenTv, OpenTvImport } from "./OpenTvImport";
+import { RecordingsSection } from "./RecordingsSection";
+import { MyChannels } from "./MyChannels";
+import { USER_AGENTS } from "../lib/userAgents";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "sources", label: "Sources & guides" },
   { id: "channels", label: "Channels & groups" },
   { id: "playback", label: "Playback" },
+  { id: "recordings", label: "Recordings" },
   { id: "appearance", label: "Appearance" },
   { id: "reactors", label: "Reactors" },
   { id: "backup", label: "Backup" },
@@ -44,6 +49,7 @@ export function Settings({ section }: { section?: SettingsSection }) {
           {current === "sources" ? <SourcesSection /> : null}
           {current === "channels" ? <ChannelsSection /> : null}
           {current === "playback" ? <PlaybackSection /> : null}
+          {current === "recordings" ? <RecordingsSection /> : null}
           {current === "appearance" ? <AppearanceSection /> : null}
           {current === "reactors" ? <ReactorList /> : null}
           {current === "backup" ? <BackupSection /> : null}
@@ -77,6 +83,7 @@ function SourcesSection() {
   const [removing, setRemoving] = useState<Source | null>(null);
   const [fixList, setFixList] = useState(false);
   const [refreshingGuides, setRefreshingGuides] = useState(false);
+  const [opentv, setOpentv] = useState<OpenTvSummary | null>(null);
   const now = Date.now();
 
   const shown = useMemo(() => {
@@ -214,12 +221,36 @@ function SourcesSection() {
             >
               <Icon name="refresh" /> Refresh guides
             </button>
+            <button
+              type="button"
+              className="btn small"
+              onClick={async () => {
+                const found = await findOpenTv(true).catch((e: unknown) => {
+                  toast(errorMessage(e), "bad");
+                  return null;
+                });
+                if (found) setOpentv(found);
+              }}
+            >
+              <Icon name="upload" /> Import from open-tv
+            </button>
             <button type="button" className="btn small pri" onClick={() => navigate({ name: "onboarding" })}>
               <Icon name="plus" /> Add source
             </button>
           </div>
         </div>
       </article>
+      {opentv ? (
+        <Modal title="open-tv" onClose={() => setOpentv(null)}>
+          <OpenTvImport
+            summary={opentv}
+            onDone={() => {
+              setOpentv(null);
+              void reloadSources();
+            }}
+          />
+        </Modal>
+      ) : null}
       {editing ? <EditSource source={editing} onClose={() => setEditing(null)} /> : null}
       {removing ? <RemoveSource source={removing} onClose={() => setRemoving(null)} /> : null}
       {fixList && unmatched ? <UnmatchedList channels={unmatched} onClose={() => { setFixList(false); reloadUnmatched(); }} /> : null}
@@ -233,6 +264,7 @@ function EditSource({ source, onClose }: { source: Source; onClose: () => void }
   const [epg, setEpg] = useState(source.epgUrls.join("\n"));
   const [limit, setLimit] = useState(source.userMaxConnections?.toString() ?? "");
   const [password, setPassword] = useState("");
+  const [agent, setAgent] = useState(source.userAgent ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const save = async () => {
@@ -247,6 +279,7 @@ function EditSource({ source, onClose }: { source: Source; onClose: () => void }
         name: name.trim() || source.name,
         epgUrls: epg.split(/\s+/).map((x) => x.trim()).filter(Boolean),
         userMaxConnections: n,
+        userAgent: agent.trim() || null,
         ...(password ? { password } : {}),
       });
       await reloadSources();
@@ -270,6 +303,17 @@ function EditSource({ source, onClose }: { source: Source; onClose: () => void }
       <label className="field">
         <span>Streams at once{source.maxConnections != null ? ` (provider says ${source.maxConnections})` : ""}</span>
         <input className="input small" inputMode="numeric" value={limit} onChange={(e) => setLimit(e.target.value.replace(/[^0-9]/g, ""))} placeholder={source.maxConnections?.toString() ?? "—"} aria-label="Connection limit override" />
+      </label>
+      <label className="field">
+        <span>User agent</span>
+        <input className="input" list="ua-presets" value={agent} onChange={(e) => setAgent(e.target.value)} placeholder="Radiate" spellCheck={false} />
+        <datalist id="ua-presets">
+          {USER_AGENTS.map((u) => (
+            <option key={u.value} value={u.value}>
+              {u.label}
+            </option>
+          ))}
+        </datalist>
       </label>
       {source.kind === "xtream" ? (
         <label className="field">
@@ -446,6 +490,7 @@ function ChannelsSection() {
           </div>
         )}
       </section>
+      <MyChannels />
       {numbersFor ? <NumbersModal groupId={numbersFor} name={order?.find((g) => g.id === numbersFor)?.name ?? ""} onClose={() => setNumbersFor(null)} /> : null}
     </div>
   );
@@ -506,7 +551,7 @@ function NumbersModal({ groupId, name, onClose }: { groupId: string; name: strin
 // ---------- Playback ----------
 
 function PlaybackSection() {
-  const { prefs, setPrefs } = useApp();
+  const { prefs, setPrefs, mpv } = useApp();
   if (!prefs) return <Skeleton h="10rem" r={14} />;
   return (
     <div className="set-stack">
@@ -550,6 +595,12 @@ function PlaybackSection() {
             onChange={(v) => void setPrefs({ liveFormat: v })}
           />
         </div>
+        {mpv ? (
+          <div className="set-row">
+            <span>Play in mpv</span>
+            <input type="checkbox" className="toggle" checked={!!prefs.playInMpv} onChange={(e) => void setPrefs({ playInMpv: e.target.checked })} aria-label="Play in mpv" />
+          </div>
+        ) : null}
         <div className="set-row">
           <span>Guide refresh</span>
           <select className="input select" value={prefs.epgRefreshHours} onChange={(e) => void setPrefs({ epgRefreshHours: Number(e.target.value) })} aria-label="Guide refresh interval">

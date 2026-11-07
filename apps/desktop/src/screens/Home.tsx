@@ -25,6 +25,7 @@ const PER_SPORTS_GROUP = 24;
 const SPORTS_CHANNELS = 160;
 const OTHERS = 60;
 const CONTINUE = 12;
+const RECENT = 12;
 const SOON = 6 * HOUR;
 
 interface HomeData {
@@ -32,6 +33,7 @@ interface HomeData {
   sports: Channel[];
   others: Channel[];
   last: Channel | null;
+  recent: Channel[];
   epg: Record<string, Programme[]>;
   cont: VodItem[];
 }
@@ -49,21 +51,23 @@ export function Home() {
     const groups = await api.groupsList("live", false).catch(() => [] as Group[]);
     const sportsGroups = groups.filter((g) => isSportsGroup(g, overrides)).slice(0, SPORTS_GROUPS);
     const page = (groupId: string, limit: number) => api.channelsList({ groupId, favoritesOnly: false, includeHidden: false, offset: 0, limit }).then((p) => p.items, () => [] as Channel[]);
-    const [fav, sportsLists, others, last, cont] = await Promise.all([
+    const recentIds = (prefs?.recentChannels ?? []).slice(0, RECENT);
+    const [fav, sportsLists, others, last, cont, recent] = await Promise.all([
       api.channelsList({ favoritesOnly: true, includeHidden: false, offset: 0, limit: FAVORITES }).then((p) => p.items, () => [] as Channel[]),
       Promise.all(sportsGroups.map((g) => page(g.id, PER_SPORTS_GROUP))),
       api.channelsList({ favoritesOnly: false, includeHidden: false, offset: 0, limit: OTHERS }).then((p) => p.items, () => [] as Channel[]),
       prefs?.lastChannelId ? api.channelGet(prefs.lastChannelId).catch(() => null) : Promise.resolve(null),
       api.continueWatching(CONTINUE).catch(() => [] as VodItem[]),
+      Promise.all(recentIds.map((id) => api.channelGet(id).catch(() => null))),
     ]);
     const sports = sportsLists.flat().slice(0, SPORTS_CHANNELS);
     const at = Date.now();
     const epgIds = [...new Set([...fav, ...sports].map((c) => c.id))];
     const epg = epgIds.length ? await api.epgRange(epgIds, at, at + SOON).catch(() => ({})) : {};
-    return { favorites: fav, sports, others, last, epg, cont };
-  }, [version, overrides, prefs?.lastChannelId]);
+    return { favorites: fav, sports, others, last, epg, cont, recent: recent.filter((c): c is Channel => !!c && !c.hidden) };
+  }, [version, overrides, prefs?.lastChannelId, (prefs?.recentChannels ?? []).slice(0, RECENT).join()]);
 
-  const ids = useMemo(() => (data ? [...data.favorites, ...data.sports, ...data.others, ...(data.last ? [data.last] : [])].map((c) => c.id) : []), [data]);
+  const ids = useMemo(() => (data ? [...data.favorites, ...data.sports, ...data.others, ...data.recent, ...(data.last ? [data.last] : [])].map((c) => c.id) : []), [data]);
   const nn = useNowNext(ids);
 
   const view = useMemo(() => {
@@ -100,6 +104,13 @@ export function Home() {
         {!data || data.favorites.length > 0 ? (
           <Row title="Favorites" size={big ? "lg" : undefined} more={{ label: "All", onClick: () => navigate({ name: "favorites" }) }}>
             {!data ? <CardSkeletons /> : data.favorites.map((c) => <ChannelCard key={c.id} channel={c} now={nn[c.id]?.now} at={now} onOpen={() => play(c, true)} onMenu={openMenu(c)} />)}
+          </Row>
+        ) : null}
+        {data && data.recent.length > 1 ? (
+          <Row title="Recently watched" size={big ? "lg" : undefined}>
+            {data.recent.map((c) => (
+              <ChannelCard key={c.id} channel={c} now={nn[c.id]?.now} at={now} onOpen={() => play(c)} onMenu={openMenu(c)} />
+            ))}
           </Row>
         ) : null}
       </>

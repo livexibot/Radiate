@@ -894,7 +894,7 @@ class MockBackend {
       case "app_info":
         return { version: "0.7.0", dataDir: "~/.local/share/radiate" };
       case "opentv_find":
-        return this.mode === "empty" || this.mode === "opentv"
+        return this.mode === "empty" || this.mode === "opentv" || a?.path
           ? {
               path: "C:\\Users\\you\\AppData\\Roaming\\fredol\\open-tv\\data\\db.sqlite",
               sources: [
