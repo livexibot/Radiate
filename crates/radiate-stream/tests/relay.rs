@@ -846,3 +846,68 @@ fn json_shapes() {
         serde_json::json!({"code": "connection_limit", "sourceId": "s", "limit": 1, "inUse": 1, "sessions": [], "external": 1})
     );
 }
+
+#[tokio::test]
+async fn records_what_the_player_reads() {
+    let (base, stats) = upstream().await;
+    let hub = StreamHub::start_with(cfg()).await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let mut events = hub.subscribe();
+
+    // HLS: the MPEG-TS segment the player fetched is written once; keys and
+    // fMP4 init sections are not.
+    let mut r = req("s1", format!("{base}/hls/master.m3u8"), Some(2));
+    r.kind_hint = StreamKind::Hls;
+    let s = hub.open(r).unwrap();
+    let path = dir.path().join("hls.ts");
+    hub.start_recording(&s.id, &path).unwrap();
+    let c = client();
+    let master = c.get(&s.local_url).send().await.unwrap().text().await.unwrap();
+    let variant = master.lines().find(|l| l.contains("media.m3u8")).unwrap().to_string();
+    let media = c.get(&variant).send().await.unwrap().text().await.unwrap();
+    for line in media.lines().filter(|l| l.starts_with("http")) {
+        let _ = c.get(line).send().await.unwrap().bytes().await;
+    }
+    let seg1 = media.lines().find(|l| l.contains("seg1.ts")).unwrap().to_string();
+    let _ = c.get(&seg1).send().await.unwrap().bytes().await;
+    let key = media
+        .split("URI=\"")
+        .nth(1)
+        .and_then(|r| r.split('"').next())
+        .unwrap()
+        .to_string();
+    let _ = c.get(&key).send().await.unwrap().bytes().await;
+    assert_eq!(hub.recordings().len(), 1);
+    let info = hub.stop_recording(&s.id).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), ts_chunk().to_vec());
+    assert_eq!(info.bytes, ts_chunk().len() as u64);
+    assert!(hub.recordings().is_empty());
+    loop {
+        if let StreamEvent::RecordingStopped { recording, .. } = events.recv().await.unwrap() {
+            assert_eq!(recording.path, path.display().to_string());
+            break;
+        }
+    }
+
+    // Live MPEG-TS: what the player reads, until the session closes.
+    let live = hub.open(req("s1", format!("{base}/live.ts"), Some(2))).unwrap();
+    let path = dir.path().join("live.ts");
+    hub.start_recording(&live.id, &path).unwrap();
+    let mut resp = c.get(&live.local_url).send().await.unwrap();
+    let mut read = 0usize;
+    while read < 3 * ts_chunk().len() {
+        read += resp.chunk().await.unwrap().unwrap().len();
+    }
+    drop(resp);
+    hub.close(&live.id);
+    let stopped = loop {
+        if let StreamEvent::RecordingStopped { recording, .. } = events.recv().await.unwrap() {
+            break recording;
+        }
+    };
+    let written = std::fs::read(&path).unwrap();
+    assert!(written.len() >= 3 * ts_chunk().len(), "{}", written.len());
+    assert_eq!(stopped.bytes as usize, written.len());
+    assert_eq!(written[0], 0x47);
+    let _ = stats;
+}

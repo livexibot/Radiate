@@ -6,7 +6,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use radiate_core::{
-    Channel, ChannelQuery, ContentKind, Core, EpgCandidate, Group, NewSource, NowNext, Page,
+    CustomChannel, Channel, ChannelQuery, ContentKind, Core, EpgCandidate, Group, NewSource, NowNext, Page,
     PlayTarget, Prefs, Programme, SearchResults, SeriesInfo, Source, SourcePatch, VodItem,
     VodQuery,
 };
@@ -316,7 +316,7 @@ fn map_kind(k: radiate_core::StreamKind) -> StreamKind {
 /// `ignore_provider_count`: the user asked to try even though the provider
 /// says its streams are in use elsewhere. Our own sessions still never go
 /// over the limit, and the provider still decides whether to serve it.
-async fn open_session(
+pub(crate) async fn open_session(
     app: &AppHandle,
     state: &AppState,
     target: PlayTarget,
@@ -533,4 +533,68 @@ pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> CmdResult<A
         version: app.package_info().version.to_string(),
         data_dir: state.data_dir.display().to_string(),
     })
+}
+
+// ---------------------------------------------------------------------------
+// Moving in from open-tv, and My channels
+
+/// open-tv's library on this computer, if there is one (no passwords).
+#[tauri::command]
+pub async fn opentv_find(
+    state: State<'_, AppState>,
+) -> CmdResult<Option<radiate_core::opentv::OtSummary>> {
+    blocking(&state.core, |c| match radiate_core::opentv::find() {
+        Some(path) => c.opentv_summary(&path).map(Some),
+        None => Ok(None),
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn opentv_import(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: Option<String>,
+) -> CmdResult<radiate_core::ImportReport> {
+    let path = match path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => radiate_core::opentv::find()
+            .ok_or_else(|| CmdError::new("not_found", "open-tv isn't on this computer."))?,
+    };
+    let report = state
+        .core
+        .import_opentv(&path, progress_emitter(&app))
+        .await?;
+    emit_all_sources(&app, &state.core);
+    Ok(report)
+}
+
+#[tauri::command]
+pub async fn custom_channels_get(state: State<'_, AppState>) -> CmdResult<Vec<CustomChannel>> {
+    blocking(&state.core, |c| c.custom_channels()).await
+}
+
+#[tauri::command]
+pub async fn custom_channels_set(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    list: Vec<CustomChannel>,
+) -> CmdResult<Option<Source>> {
+    let before: Vec<String> = state.core.sources()?.into_iter().map(|s| s.id).collect();
+    let source = state
+        .core
+        .set_custom_channels(list, progress_emitter(&app))
+        .await?;
+    match &source {
+        Some(s) => {
+            let _ = app.emit("source-updated", s);
+        }
+        None => {
+            let after: Vec<String> = state.core.sources()?.into_iter().map(|s| s.id).collect();
+            if after.len() != before.len() {
+                let _ = app.emit("sources-changed", ());
+            }
+        }
+    }
+    Ok(source)
 }

@@ -31,8 +31,10 @@
 
 mod convert;
 pub mod embed;
+pub use record::RecordingInfo;
 mod failure;
 mod hls;
+mod record;
 mod relay;
 mod sniff;
 
@@ -173,6 +175,11 @@ pub enum StreamEvent {
     Closed {
         session_id: String,
     },
+    /// A recording ended: stopped, or its session closed.
+    RecordingStopped {
+        session_id: String,
+        recording: RecordingInfo,
+    },
 }
 
 impl StreamEvent {
@@ -180,7 +187,8 @@ impl StreamEvent {
         match self {
             StreamEvent::Health { session_id, .. }
             | StreamEvent::Failed { session_id, .. }
-            | StreamEvent::Closed { session_id } => session_id,
+            | StreamEvent::Closed { session_id }
+            | StreamEvent::RecordingStopped { session_id, .. } => session_id,
         }
     }
 }
@@ -253,6 +261,12 @@ impl Inner {
         let removed = self.sessions.lock().unwrap().remove(id);
         if let Some(s) = removed {
             s.shut();
+            if let Some(rec) = s.take_recorder() {
+                self.emit(StreamEvent::RecordingStopped {
+                    session_id: id.to_string(),
+                    recording: rec,
+                });
+            }
             if s.dialed() {
                 self.remember(RecentClose {
                     source_id: s.source_id.clone(),
@@ -412,6 +426,40 @@ impl StreamHub {
     /// Close a session and cancel its upstream requests. Idempotent.
     pub fn close(&self, session_id: &str) {
         self.inner.close(session_id);
+    }
+
+    /// Start writing what the session plays to `path` (MPEG-TS). Replaces
+    /// a recording already running on the session.
+    pub fn start_recording(&self, session_id: &str, path: &std::path::Path) -> std::io::Result<RecordingInfo> {
+        let s = self
+            .inner
+            .session(session_id)
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "This stream has stopped."))?;
+        let rec = record::Recorder::create(path)?;
+        let info = rec.info(session_id);
+        if let Some(old) = s.set_recorder(rec) {
+            self.inner.emit(StreamEvent::RecordingStopped {
+                session_id: session_id.to_string(),
+                recording: old,
+            });
+        }
+        Ok(info)
+    }
+
+    /// Stop a session's recording. The stream keeps playing.
+    pub fn stop_recording(&self, session_id: &str) -> Option<RecordingInfo> {
+        let rec = self.inner.session(session_id)?.take_recorder()?;
+        self.inner.emit(StreamEvent::RecordingStopped {
+            session_id: session_id.to_string(),
+            recording: rec.clone(),
+        });
+        Some(rec)
+    }
+
+    /// Recordings running now.
+    pub fn recordings(&self) -> Vec<RecordingInfo> {
+        let sessions: Vec<_> = self.inner.sessions.lock().unwrap().values().cloned().collect();
+        sessions.iter().filter_map(|s| s.recording()).collect()
     }
 
     /// Close every session (on window close or shutdown).

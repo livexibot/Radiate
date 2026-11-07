@@ -29,6 +29,9 @@ pub fn forward_stream_events(app: AppHandle, hub: StreamHub) {
                 StreamEvent::Failed { .. } => {
                     let _ = app.emit("stream-failed", &ev);
                 }
+                StreamEvent::RecordingStopped { recording, .. } => {
+                    crate::recording::on_stopped(&app, recording.clone());
+                }
                 StreamEvent::Closed { session_id } => {
                     let _ = app.emit("stream-closed", &ev);
                     if let Some(state) = app.try_state::<AppState>() {
@@ -84,7 +87,31 @@ pub fn keep_guides_fresh(app: AppHandle, core: Arc<Core>) {
                 .max(1) as i64;
             let has_sources = core.sources().map(|s| !s.is_empty()).unwrap_or(false);
             let due = last.is_none_or(|t| now_ms() - t >= hours * 3_600_000);
-            if has_sources && due {
+            // Channel lists older than a day are fetched again (with their
+            // guides): providers move channels and change their addresses.
+            let stale: Vec<String> = core
+                .sources()
+                .map(|v| {
+                    v.into_iter()
+                        .filter(|s| s.last_refreshed.is_some_and(|t| now_ms() - t >= 24 * 3_600_000))
+                        .map(|s| s.id)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut refreshed_any = false;
+            for id in stale {
+                tracing::info!("refreshing source {id}");
+                match core.refresh_source(&id, progress_emitter(&app)).await {
+                    Ok(s) => {
+                        let _ = app.emit("source-updated", &s);
+                        refreshed_any = true;
+                    }
+                    Err(e) => tracing::warn!("source refresh failed: {e}"),
+                }
+            }
+            if refreshed_any {
+                last = Some(now_ms());
+            } else if has_sources && due {
                 tracing::info!("refreshing guides");
                 match core.refresh_guides(progress_emitter(&app)).await {
                     Ok(()) => emit_all_sources(&app, &core),

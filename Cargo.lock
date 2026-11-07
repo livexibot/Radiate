@@ -3348,6 +3348,7 @@ dependencies = [
 name = "radiate-desktop"
 version = "0.6.0"
 dependencies = [
+ "chrono",
  "keyring",
  "radiate-core",
  "radiate-stream",
@@ -3377,6 +3378,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-stream",

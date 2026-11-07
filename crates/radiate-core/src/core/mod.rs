@@ -2,7 +2,8 @@
 
 mod custom;
 mod guide;
-mod import;
+pub(crate) mod import;
+pub use import::{ImportReport, ImportSkip};
 mod library;
 mod search;
 mod settings;

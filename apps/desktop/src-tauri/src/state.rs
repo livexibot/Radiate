@@ -19,6 +19,9 @@ pub struct AppState {
     pub data_dir: PathBuf,
     /// Running mpv processes by relay session id; sending stops the process.
     pub mpv: Mutex<HashMap<String, oneshot::Sender<()>>>,
+    /// The bundled (or installed) ffmpeg, for recordings.
+    pub ffmpeg: Option<PathBuf>,
+    pub recordings: crate::recording::Recordings,
 }
 
 impl AppState {

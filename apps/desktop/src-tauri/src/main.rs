@@ -6,6 +6,7 @@ mod commands;
 mod error;
 mod secrets;
 mod state;
+mod recording;
 mod tools;
 mod updater;
 mod youtube;
@@ -33,7 +34,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     let hub = tauri::async_runtime::block_on(StreamHub::start_with(HubConfig {
         user_agent: Some(user_agent),
-        ffmpeg,
+        ffmpeg: ffmpeg.clone(),
         ..HubConfig::default()
     }))?;
     state::restore_recent_closes(&hub, &data_dir);
@@ -46,6 +47,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         hub,
         data_dir,
         mpv: Mutex::new(HashMap::new()),
+        ffmpeg,
+        recordings: Default::default(),
     });
     Ok(())
 }
@@ -134,6 +137,17 @@ fn main() {
             commands::mpv_available,
             commands::mpv_open,
             commands::app_info,
+            commands::opentv_find,
+            commands::opentv_import,
+            commands::custom_channels_get,
+            commands::custom_channels_set,
+            recording::record_start,
+            recording::record_stop,
+            recording::record_channel,
+            recording::recordings_active,
+            recording::recordings_list,
+            recording::recordings_folder,
+            recording::open_path,
             updater::update_installs_in_background,
             updater::update_prepare,
             youtube::youtube_resolve,

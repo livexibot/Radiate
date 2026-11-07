@@ -28,9 +28,18 @@ fn common_locations() -> Vec<PathBuf> {
         .flatten()
         {
             v.push(base.join("mpv").join("mpv.exe"));
+            // The mpv that open-tv (Fred TV) installs beside itself.
+            for app in ["Fred TV", "Open TV", "open-tv"] {
+                v.push(base.join(app).join("deps").join("mpv.exe"));
+            }
         }
         if let Some(local) = env("LOCALAPPDATA") {
             v.push(local.join("Programs").join("mpv").join("mpv.exe"));
+            v.push(local.join("mpv").join("mpv.exe"));
+            for app in ["Fred TV", "Open TV", "open-tv"] {
+                v.push(local.join(app).join("deps").join("mpv.exe"));
+                v.push(local.join("Programs").join(app).join("deps").join("mpv.exe"));
+            }
             v.push(
                 local
                     .join("Microsoft")

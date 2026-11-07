@@ -97,6 +97,7 @@ pub(crate) struct Session {
     pub(crate) convert: Mutex<ConvertState>,
     /// See [`crate::OpenRequest::finite`].
     finite: bool,
+    recorder: Mutex<Option<crate::record::Recorder>>,
 }
 
 impl Session {
@@ -161,6 +162,7 @@ impl Session {
             dialed: AtomicBool::new(false),
             convert: Mutex::new(ConvertState::default()),
             finite: req.finite,
+            recorder: Mutex::new(None),
         }
     }
 
@@ -175,6 +177,35 @@ impl Session {
             source_id: self.source_id.clone(),
             title: self.title.clone(),
             started_at: self.started_at,
+        }
+    }
+
+    pub(crate) fn set_recorder(
+        &self,
+        r: crate::record::Recorder,
+    ) -> Option<crate::record::RecordingInfo> {
+        let old = self.recorder.lock().unwrap().replace(r);
+        old.map(|o| o.finish(&self.id))
+    }
+
+    pub(crate) fn take_recorder(&self) -> Option<crate::record::RecordingInfo> {
+        let old = self.recorder.lock().unwrap().take();
+        old.map(|o| o.finish(&self.id))
+    }
+
+    pub(crate) fn recording(&self) -> Option<crate::record::RecordingInfo> {
+        self.recorder.lock().unwrap().as_ref().map(|r| r.info(&self.id))
+    }
+
+    fn record_stream(&self, b: &[u8]) {
+        if let Some(r) = self.recorder.lock().unwrap().as_mut() {
+            r.stream(b);
+        }
+    }
+
+    fn record_segment(&self, url: &str, b: &[u8]) {
+        if let Some(r) = self.recorder.lock().unwrap().as_mut() {
+            r.segment(url, b);
         }
     }
 
@@ -718,6 +749,7 @@ async fn serve(
             Ok(Ok((body, _))) => {
                 drop(permit);
                 s.touch();
+                s.record_segment(url.as_str(), &body);
                 *r.body_mut() = Body::from(body);
                 return with_common(r);
             }
@@ -735,7 +767,10 @@ async fn serve(
     }
 
     let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(8);
+    // The player's read of a whole MPEG-TS stream is what a recording keeps.
+    let tee = is_root && s.kind() == StreamKind::MpegTs;
     let pump = Pump {
+        tee,
         inner: inner.clone(),
         s: s.clone(),
         url,
@@ -752,6 +787,7 @@ async fn serve(
 }
 
 struct Pump {
+    tee: bool,
     inner: Arc<Inner>,
     s: Arc<Session>,
     url: Url,
@@ -868,7 +904,10 @@ impl Pump {
     async fn send(&self, tx: &mpsc::Sender<Result<Bytes, std::io::Error>>, b: Bytes) -> bool {
         tokio::select! {
             _ = self.token.cancelled() => false,
-            r = tx.send(Ok(b)) => {
+            r = tx.send(Ok(b.clone())) => {
+                if self.tee && r.is_ok() {
+                    self.s.record_stream(&b);
+                }
                 self.s.touch();
                 r.is_ok()
             }

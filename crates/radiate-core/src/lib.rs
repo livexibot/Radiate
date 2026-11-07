@@ -15,7 +15,7 @@ mod types;
 pub mod xmltv;
 pub mod xtream;
 
-pub use crate::core::Core;
+pub use crate::core::{Core, ImportReport, ImportSkip};
 pub use error::{Error, Result};
 pub use secrets::{MemorySecretStore, SecretStore};
 pub use types::*;
