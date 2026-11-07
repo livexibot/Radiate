@@ -895,6 +895,10 @@ class MockBackend {
         this.mpvSession = session.id;
         return { sessionId: session.id };
       }
+      case "mpv_delay":
+      case "mpv_multiview":
+      case "mpv_multiview_focus":
+      case "mpv_message":
       case "mpv_info":
         return undefined;
       case "mpv_stop": {
@@ -907,7 +911,7 @@ class MockBackend {
         return undefined;
       }
       case "app_info":
-        return { version: "0.8.0", dataDir: "~/.local/share/radiate" };
+        return { version: "0.9.0", dataDir: "~/.local/share/radiate" };
       case "opentv_find":
         return this.mode === "empty" || this.mode === "opentv" || a?.path
           ? {

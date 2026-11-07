@@ -181,14 +181,22 @@ export function MpvCard({
   now,
   next,
   at,
-  onHere,
+  title,
+  sub,
+  progress,
+  live,
   onStop,
 }: {
   channel?: Channel | null;
   now?: Programme | null;
   next?: Programme | null;
   at?: number;
-  onHere?: () => void;
+  /** A film or catch-up: what plays, a line under it and how far through it is (0..1). */
+  title?: string;
+  sub?: string;
+  progress?: number | null;
+  /** Live TV (the channel keys work in mpv). */
+  live: boolean;
   onStop: () => void;
 }) {
   const t = at ?? Date.now();
@@ -197,7 +205,7 @@ export function MpvCard({
       <span className="mpv-badge">
         <Icon name="external" /> mpv
       </span>
-      {channel ? (
+      {channel && live ? (
         <div className="mpv-now">
           <Logo name={channel.name} src={channel.logo} />
           <div className="mpv-now-main">
@@ -218,30 +226,61 @@ export function MpvCard({
             ) : null}
           </div>
         </div>
+      ) : title ? (
+        <div className="mpv-now">
+          {channel ? <Logo name={channel.name} src={channel.logo} /> : null}
+          <div className="mpv-now-main">
+            {sub ? <span className="mpv-ch">{sub}</span> : null}
+            <b className="mpv-title">{title}</b>
+            {progress != null ? (
+              <span className="mpv-time">
+                <Progress value={progress} />
+              </span>
+            ) : null}
+          </div>
+        </div>
       ) : (
         <b>Playing in mpv</b>
       )}
       <div className="mpv-keys mute" aria-label="Keys in mpv">
-        <span>
-          <kbd>↑</kbd>
-          <kbd>↓</kbd> Channel
-        </span>
-        <span>
-          <kbd>0–9</kbd> Number
-        </span>
-        <span>
-          <kbd>Tab</kbd> Info
-        </span>
-        <span>
-          <kbd>C</kbd> Record
-        </span>
+        {live ? (
+          <>
+            <span>
+              <kbd>↑</kbd>
+              <kbd>↓</kbd> Channel
+            </span>
+            <span>
+              <kbd>0–9</kbd> Number
+            </span>
+            <span>
+              <kbd>←</kbd> Rewind
+            </span>
+            <span>
+              <kbd>R</kbd> Reactors
+            </span>
+            <span>
+              <kbd>Tab</kbd> Info
+            </span>
+            <span>
+              <kbd>C</kbd> Record
+            </span>
+          </>
+        ) : (
+          <>
+            <span>
+              <kbd>Space</kbd> Pause
+            </span>
+            <span>
+              <kbd>←</kbd>
+              <kbd>→</kbd> Seek
+            </span>
+            <span>
+              <kbd>F</kbd> Full screen
+            </span>
+          </>
+        )}
       </div>
       <div className="state-actions">
-        {onHere ? (
-          <button type="button" className="btn" onClick={onHere}>
-            <Icon name="play" /> Play here
-          </button>
-        ) : null}
         <button type="button" className="btn" onClick={onStop}>
           <Icon name="stop" /> Stop
         </button>

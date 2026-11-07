@@ -269,7 +269,7 @@ export interface Prefs {
   reminders?: Reminder[] | null;
   /** Where recordings go; empty for Videos/Radiate. */
   recordingsDir?: string | null;
-  /** Open live channels in mpv instead of the built-in player (on unless turned off). */
+  /** Everything plays in mpv (on unless false; Radiate's own player is for when mpv can't be found). */
   playInMpv?: boolean | null;
   /** mpv: hardware decoding (on unless turned off). */
   mpvHwdec?: boolean | null;
@@ -381,7 +381,8 @@ export interface EventMap {
   "stream-closed": StreamClosed;
   "connections-changed": ConnectionUsage[];
   "recordings-changed": ActiveRecording[];
-  /** A key pressed in the mpv window that Radiate acts on (zap, number, previous, record). */
+  /** From the mpv window: a key Radiate acts on (zap, number, previous, record), or how a film is
+   * going (time "pos dur", pause "1"/"0", ended). */
   "mpv-command": { action: string; value: string };
   "mpv-closed": { sessionId: string };
   "recording-saved": { path: string; bytes: number };
@@ -426,7 +427,11 @@ export interface Commands {
   settings_export: [{ path: string; includeSecrets: boolean }, void];
   settings_import: [{ path: string }, void];
   mpv_available: [undefined, boolean];
-  mpv_open: [{ target: PlayTarget; info?: MpvInfo | null }, MpvStarted];
+  mpv_open: [{ target: PlayTarget; info?: MpvInfo | null; resume?: number | null }, MpvStarted];
+  mpv_delay: [{ seconds: number }, void];
+  mpv_multiview: [{ tiles: (string | null)[]; names: string[]; layout: string; focus: number }, void];
+  mpv_multiview_focus: [{ focus: number }, void];
+  mpv_message: [{ text: string }, void];
   mpv_info: [{ info: MpvInfo }, void];
   mpv_stop: [undefined, void];
   app_info: [undefined, AppInfo];

@@ -19,8 +19,8 @@ AppImage, `.deb` or `.rpm` for Linux. Radiate updates itself after that.
   starting soon, from your favorites and every sports group. Live and the
   guide have a Sports view, and you choose which groups count as sports.
 - **Watch with reactors.** Save YouTube reactors by link, then show up to
-  four at once, each in a box beside the match: drag them anywhere, resize
-  them to any shape by their corners and edges, and the match makes room.
+  four at once, each in a box of its own over the match in mpv (R): drag
+  them anywhere, resize them to any shape by their corners and edges.
   Each box has its own volume and mute, opens where you left it, and stays
   on top of everything else. If the reactors are behind your feed, delay
   the match a few seconds to line them up: it goes back through what has
@@ -59,16 +59,18 @@ AppImage, `.deb` or `.rpm` for Linux. Radiate updates itself after that.
 - **Zapping like a TV.** Up and down to change channel, type a number,
   Back twice for the previous channel, Enter for the channel list. F1
   shows every shortcut.
-- **Channels open in mpv,** like open-tv: one window with a modern look, a
-  banner with the channel and what's on, and Up / Down, numbers and
-  Backspace to change channel right there, on the same connection. Play
-  here moves it into Radiate's own player (Reactors and Multiview use that
-  one). The Windows installer brings mpv along; elsewhere Radiate uses the
-  mpv you have.
+- **Everything plays in mpv,** like open-tv: channels, catch-up, movies,
+  series and Multiview, in one window with a modern look, a banner with
+  the channel and what's on, and Up / Down, numbers and Backspace to change
+  channel right there, on the same connection. Reactors, the delay,
+  recording, resume and next episode all work with it. The Windows
+  installer brings mpv along; elsewhere Radiate uses the mpv you have (and
+  its own player if there is none).
 - **Movies and series** from Xtream sources in one Library, grouped into
   seasons, with progress, resume and Continue watching.
-- **Multiview.** Up to four channels at once, one big and three small or a
-  2×2 grid, with sound following the highlighted tile. It never opens more
+- **Multiview.** Up to four channels at once in one mpv window, one big and
+  three small or a 2×2 grid, with sound following the highlighted tile
+  (arrows or a click to move it, Enter or a double click to make it the big one). It never opens more
   streams than your provider allows.
 - **Honest errors.** When a stream fails, Radiate says why in plain words
   (offline at the provider, account refused, server trouble) and offers to

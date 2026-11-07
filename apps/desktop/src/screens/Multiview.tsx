@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, type Channel, type ConnectionUsage, type NowNext } from "../api";
+import { api, errorMessage, type Channel, type ConnectionUsage, type NowNext } from "../api";
 import { Icon } from "../components/Icon";
 import { Logo } from "../components/Logo";
 import { Modal } from "../components/Modal";
@@ -16,7 +16,10 @@ type MvRoute = Extract<Route, { name: "multiview" }>;
 type TileStatus = StreamState["status"];
 
 export function Multiview({ route }: { route: MvRoute }) {
-  const { navigate, back, usage, prefs, sourceName, toast } = useApp();
+  const { navigate, back, usage, prefs, sourceName, toast, mpv } = useApp();
+  // The tiles play in mpv, side by side in its one window; this screen picks and arranges them.
+  const inMpv = !!prefs && prefs.playInMpv !== false && mpv;
+  const [urls, setUrls] = useState<(string | null)[]>(() => Array(TILE_COUNT).fill(null));
   const [layout, setLayout] = useState<Layout>("1+3");
   const [tiles, setTiles] = useState<(Channel | null)[]>(() => Array(TILE_COUNT).fill(null));
   const [focus, setFocus] = useState(0);
@@ -130,6 +133,53 @@ export function Multiview({ route }: { route: MvRoute }) {
 
   const used = new Set(tiles.filter(Boolean).map((c) => c!.id));
 
+  const onUrl = useCallback((i: number, url: string | null) => setUrls((u) => (u[i] === url ? u : u.map((x, k) => (k === i ? url : x)))), []);
+  // mpv shows what the tiles have; it is told again when a tile or the layout changes.
+  const names = tiles.map((c) => c?.name ?? "").join("\u0000");
+  const focusRef = useRef(focus);
+  focusRef.current = focus;
+  useEffect(() => {
+    if (!inMpv || !urls.some(Boolean)) return;
+    const t = window.setTimeout(() => {
+      void api.mpvMultiview(urls, names.split("\u0000"), layout, focusRef.current).catch((e) => toast(errorMessage(e), "bad"));
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [inMpv, urls, names, layout, toast]);
+  useEffect(() => {
+    if (inMpv) void api.mpvMultiviewFocus(focus).catch(() => undefined);
+  }, [inMpv, focus]);
+  const closing = useRef(false);
+  useEffect(() => {
+    if (!inMpv) return;
+    closing.current = false;
+    return () => {
+      closing.current = true;
+      void api.mpvStop().catch(() => undefined);
+    };
+  }, [inMpv]);
+  // Keys and clicks in mpv's window.
+  const mvKeys = useRef({ layout, promote });
+  mvKeys.current = { layout, promote };
+  useEffect(() => {
+    if (!inMpv) return;
+    const offKey = api.on("mpv-command", ({ action, value }) => {
+      const n = Number(value);
+      if (action === "mv-focus" && n >= 0 && n < TILE_COUNT) setFocus(n);
+      else if (action === "mv-promote" && n >= 0 && n < TILE_COUNT) mvKeys.current.promote(n);
+      else if (action === "mv-move") {
+        const key = ({ LEFT: "ArrowLeft", RIGHT: "ArrowRight", UP: "ArrowUp", DOWN: "ArrowDown" } as const)[value as "LEFT"];
+        if (key) setFocus((f) => moveFocus(mvKeys.current.layout, f, key));
+      }
+    });
+    const offClosed = api.on("mpv-closed", () => {
+      if (!closing.current) back();
+    });
+    return () => {
+      offKey();
+      offClosed();
+    };
+  }, [inMpv, back]);
+
   return (
     <div className="mv-screen">
       <div className={layout === "1+3" ? "mv l13" : "mv l22"}>
@@ -149,6 +199,8 @@ export function Multiview({ route }: { route: MvRoute }) {
             onPick={() => setPicker(i)}
             stopOptions={!tiles[i] && blocked ? tiles.map((c, k) => ({ c, k })).filter((x): x is { c: Channel; k: number } => !!x.c && x.c.sourceId === blocked.sourceId) : []}
             onStopTile={(k) => closeTile(k)}
+            inMpv={inMpv}
+            onUrl={onUrl}
           />
         ))}
       </div>
@@ -212,10 +264,15 @@ interface TileProps {
   onPick: () => void;
   stopOptions: { c: Channel; k: number }[];
   onStopTile: (k: number) => void;
+  /** The picture is in mpv: the tile only hands its stream over. */
+  inMpv: boolean;
+  onUrl: (i: number, url: string | null) => void;
 }
 
-function Tile({ index, channel, focused, muted, volume, now, onFocus, onPromote, onStatus, emptyNote, onPick, stopOptions, onStopTile }: TileProps) {
+function Tile({ index, channel, focused, muted, volume, now, onFocus, onPromote, onStatus, emptyNote, onPick, stopOptions, onStopTile, inMpv, onUrl }: TileProps) {
   const { state, retry } = useStream(channel ? { type: "channel", id: channel.id } : null);
+  const url = channel && state.status === "ready" ? state.stream.url : null;
+  useEffect(() => onUrl(index, url), [index, url, onUrl]);
   const [nn, setNn] = useState<NowNext | null>(null);
   const ref = useRef<HTMLButtonElement>(null);
   useEffect(() => onStatus(index, state.status), [index, state.status, onStatus]);
@@ -240,7 +297,7 @@ function Tile({ index, channel, focused, muted, volume, now, onFocus, onPromote,
             <span>{monogram(channel.name)}</span>
           </span>
         ) : null}
-        {channel && state.status === "ready" ? <VideoSurface stream={state.stream} muted={muted} volume={volume} /> : null}
+        {channel && state.status === "ready" && !inMpv ? <VideoSurface stream={state.stream} muted={muted} volume={volume} /> : null}
         {channel ? (
           <span className="tag">
             <span className="tag-code">{channel.name}</span>

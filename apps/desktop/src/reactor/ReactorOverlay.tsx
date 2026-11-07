@@ -5,6 +5,7 @@ import { Icon } from "../components/Icon";
 import { closeWindow, embedUrl, liveNow, onMainWindowMoved, onWindowClosed, openWindow, placeWindow } from "./api";
 import { moveBox, resizeBox, type Handle, type Rect } from "./box";
 import { YtBridge, type PlayerState } from "./bridge";
+import { dragWindow } from "./float";
 import { canOpenOnYouTube, playerErrorText, type Reactor, type ReactorView } from "./link";
 import "./reactor.css";
 
@@ -31,6 +32,8 @@ interface Props {
   onDrag: (r: Rect | null) => void;
   /** Where the box was left after a move or resize. */
   onDrop: (r: Rect) => void;
+  /** The box is a window of its own (over mpv): moving and resizing move the window. */
+  floating?: boolean;
 }
 
 type Show = { videoId: string | null; channelId: string | null };
@@ -44,7 +47,7 @@ function screenRect(el: HTMLElement | null) {
 }
 
 /** YouTube's own embedded player in a box over the match, which can be moved and resized to any shape. */
-export function ReactorOverlay({ reactor, view, rect, area, chrome, onClose, onMute, onFocusLeft, onDrag, onDrop }: Props) {
+export function ReactorOverlay({ reactor, view, rect, area, chrome, onClose, onMute, onFocusLeft, onDrag, onDrop, floating = false }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const bridge = useRef<YtBridge | null>(null);
@@ -207,6 +210,11 @@ export function ReactorOverlay({ reactor, view, rect, area, chrome, onClose, onM
   // nothing under the pointer (another reactor's player) can take them.
   const begin = (kind: Drag["kind"]) => (e: React.PointerEvent<HTMLElement>) => {
     if (e.button !== 0 || (kind === "move" && (e.target as HTMLElement).closest("button"))) return;
+    if (floating) {
+      e.preventDefault();
+      void dragWindow(kind).catch(() => undefined);
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     try {
@@ -251,7 +259,7 @@ export function ReactorOverlay({ reactor, view, rect, area, chrome, onClose, onM
   }, [isDragging]);
 
   const style = { left: rect.x, top: rect.y, width: rect.w, height: rect.h };
-  const cls = `reactor${chrome ? " chrome" : ""}${dragging ? " drag" : ""}`;
+  const cls = `reactor${chrome ? " chrome" : ""}${dragging ? " drag" : ""}${floating ? " floating" : ""}`;
   return (
     <div ref={box} className={cls} style={style} data-reactor={reactor.id}>
       {src && !external ? (

@@ -62,8 +62,12 @@ limit card; a stream reported on another device does, the card checks again
 by itself, and Play anyway asks the provider), `stall` (a frozen live picture
 becomes the failure card), `mpv` (needs `mpv` installed: a channel opens in mpv on the
 relay; Up / Down, a typed number and Backspace sent to mpv's IPC change channel in the same
-window on one connection; Play here, closing mpv and Stop; `run/mpv-banner.png` is the
-whole screen with mpv's banner). The other scenarios turn Play in mpv off first.
+window on one connection; R opens the reactor's own box over mpv and the delay holds the
+match back on the same connection, R again closes it; closing mpv and Stop; a movie plays in
+mpv, its progress is saved and it resumes there; Multiview plays its tiles in one mpv with an
+xstack, one connection per tile, arrows move the focus and Back closes everything.
+`run/mpv-banner.png`, `run/mpv-reactor.png` and `run/mpv-multiview.png` are the whole
+screen). The other scenarios use Radiate's own player (the hidden `playInMpv: false`).
 `source` must run first in a fresh app; without a system
 keyring the password lives in memory, so start with `up --fresh` after each
 `down`.

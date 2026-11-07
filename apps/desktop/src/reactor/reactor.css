@@ -80,3 +80,7 @@
 .react-item:hover { background: var(--c-surface-2); }
 .react-item-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .react-item-main span { font-size: var(--fs-xs); }
+
+/* a reactor's own window over mpv: the box is the whole window */
+.reactor-float { position: fixed; inset: 0; background: #000; }
+.reactor.floating { inset: 0; width: 100% !important; height: 100% !important; border-radius: 0; box-shadow: none; animation: none; }

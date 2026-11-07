@@ -30,6 +30,8 @@ export interface ReactorView {
   /** 0 to 100. */
   volume: number;
   muted: boolean;
+  /** Over mpv: where its own window was left. */
+  float?: FloatRect | null;
 }
 
 export interface OverlayPrefs {
@@ -76,9 +78,26 @@ function viewsOf(v: unknown, volume: number): Record<string, ReactorView> {
   for (const [id, x] of Object.entries(v as Record<string, unknown>).slice(0, MAX_VIEWS)) {
     if (!VIEW_KEY.test(id) || !x || typeof x !== "object") continue;
     const r = x as Record<string, unknown>;
-    out[id] = { box: boxOf(r.box), volume: clamp(Math.round(Number(r.volume)), 0, 100, volume), muted: r.muted === true };
+    const float = floatOf(r.float);
+    out[id] = { box: boxOf(r.box), volume: clamp(Math.round(Number(r.volume)), 0, 100, volume), muted: r.muted === true, ...(float ? { float } : {}) };
   }
   return out;
+}
+
+/** Where a reactor's own window was left over mpv, on the screen (logical pixels). */
+export interface FloatRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export function floatOf(b: unknown): FloatRect | null {
+  if (!b || typeof b !== "object") return null;
+  const { x, y, w, h } = b as Record<string, unknown>;
+  const ok = (v: unknown, lo: number, hi: number) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi;
+  if (!ok(x, -20000, 20000) || !ok(y, -20000, 20000) || !ok(w, 120, 8000) || !ok(h, 68, 8000)) return null;
+  return { x: Math.round(x as number), y: Math.round(y as number), w: Math.round(w as number), h: Math.round(h as number) };
 }
 
 function boxOf(b: unknown): BoxPrefs | null {

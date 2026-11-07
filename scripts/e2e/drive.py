@@ -22,6 +22,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import shutil
 import sqlite3
 import signal
@@ -403,6 +404,17 @@ def mpv_pids() -> list[int]:
     """mpv windows the app started (they load Radiate's script)."""
     out = subprocess.run(["pgrep", "-f", "mpv/radiate.lua"], capture_output=True, text=True).stdout.split()
     return [int(x) for x in out]
+
+
+def mpv_ipc() -> MpvIpc | None:
+    """A link to the app's mpv window, once it is there."""
+    sock = mpv_socket()
+    if not sock:
+        return None
+    try:
+        return MpvIpc(sock)
+    except OSError:
+        return None
 
 
 def mpv_socket() -> str | None:
@@ -857,14 +869,20 @@ class Run:
         r.ok(self.converters() == 0, f"no ffmpeg left running ({self.converters()})")
 
     def mpv(self) -> None:
-        """Channels open in mpv by default, like open-tv: one mpv window that plays the relay, Up / Down
-        and numbers typed in mpv change channel in the same window on one connection, Backspace goes
-        back, Play here moves to Radiate's own player, and closing mpv leaves the player."""
+        """Everything plays in mpv, like open-tv: one mpv window that plays the relay; Up / Down,
+        numbers and Backspace typed in mpv change channel in the same window on one connection;
+        reactors in windows of their own over mpv, with the delay; Stop and closing mpv; films
+        that remember their place; multiview side by side in mpv."""
         r = self.r
         if not shutil.which("mpv"):
             r.note("mpv isn't installed; skipped")
             return
-        self.s.invoke("prefs_set", {"patch": {"playInMpv": True, "liveFormat": "ts", "latency": "normal"}})
+        video_id = "abcDEF12_-x"
+        self.s.invoke("prefs_set", {"patch": {
+            "playInMpv": True, "liveFormat": "ts", "latency": "normal",
+            "reactors": [{"id": "rtest", "name": "Test Reactor", "url": f"https://youtu.be/{video_id}", "kind": "video", "videoId": video_id, "channelId": None}],
+            "reactorOverlay": {"size": "m", "side": "left", "volume": 60, "delay": 5},
+        }})
         chans = self.s.invoke("channels_list", {"query": {"favoritesOnly": False, "includeHidden": False, "offset": 0, "limit": 50}})["items"]  # type: ignore[index]
         chans = sorted((c for c in chans if c.get("number")), key=lambda c: c["number"])
         a, b, c3 = chans[0], chans[1], chans[2]
@@ -910,14 +928,25 @@ class Run:
             self.shot("mpv-card")
         finally:
             ipc.close()
-        # Play here: mpv closes and Radiate's own player takes over
-        self.s.click(xp_text("button", "Play here"))
-        self.s.wait("mpv closed", lambda: not mpv_pids(), timeout=10)
-        v = self.wait_playing(min_t=1, timeout=30)
-        ours, prov, _ = self.in_use()
-        r.ok(v["w"] > 0 and ours == 1 and prov <= 1, f"Play here plays in Radiate on one connection (app {ours}, provider {prov})")
-        self.leave_player()
-        self.s.wait("stopped", lambda: self.in_use()[0] == 0, timeout=10)
+        # Reactors float over mpv in windows of their own; R in mpv shows them, and the delay
+        # goes back through what mpv has already received
+        ipc = MpvIpc(mpv_socket())  # type: ignore[arg-type]
+        try:
+            time.sleep(6)  # some of the channel in mpv's cache to go back through
+            ipc.cmd("keypress", "r")
+            box = self.s.wait("reactor window", lambda: self.x_window("Test Reactor"), timeout=15)
+            r.ok(box["w"] >= 160 and box["h"] >= 90, f"R in mpv opens the reactor in a window of its own over mpv ({box['w']}x{box['h']} at {box['x']},{box['y']})")
+            behind = self.s.wait("held back", lambda: (c := ipc.cmd("get_property", "demuxer-cache-time")) and (t := ipc.cmd("get_property", "time-pos")) and c - t >= 4 and round(c - t, 1), timeout=15)
+            r.ok(True, f"the reactor's 5 s delay goes back through mpv's buffer: {behind} s behind what has arrived")
+            self.xshot("mpv-reactor")
+            ours, prov, _ = self.in_use()
+            r.ok(ours == 1 and prov == 1, f"still one connection with the reactor and the delay (app {ours}, provider {prov})")
+            ipc.cmd("keypress", "r")
+            self.s.wait("reactor closed", lambda: not self.x_window("Test Reactor"), timeout=10)
+            caught = self.s.wait("back to live", lambda: (c := ipc.cmd("get_property", "demuxer-cache-time")) and (t := ipc.cmd("get_property", "time-pos")) and c - t < 3 and round(c - t, 1), timeout=15)
+            r.ok(True, f"R again closes the reactor's window and the match catches up ({caught} s behind)")
+        finally:
+            ipc.close()
         # Closing the mpv window leaves the player
         self.watch(a["id"])
         self.s.wait("mpv window", lambda: mpv_pids(), timeout=20)
@@ -940,7 +969,88 @@ class Run:
         self.s.wait("mpv closed", lambda: not mpv_pids(), timeout=10)
         self.s.wait("stream closed", lambda: self.in_use()[0] == 0, timeout=10)
         r.ok(True, "Stop closes mpv and the stream")
-        self.s.invoke("prefs_set", {"patch": {"playInMpv": False}})
+
+        # Films play in mpv too, and remember where they were
+        self.open_movie("Faststart Movie")
+        self.s.click(xp_text("button", "Play")) or self.s.click(xp_text("button", "From the start"))
+        self.s.wait("mpv window", lambda: mpv_pids(), timeout=20)
+        ipc = self.s.wait("mpv ipc", mpv_ipc, timeout=10)
+        try:
+            dur = self.s.wait("film playing", lambda: (d := ipc.cmd("get_property", "duration")) and (ipc.cmd("get_property", "time-pos") or 0) > 1 and d, timeout=30)
+            r.ok(abs(dur - 300) < 2, f"a film plays in mpv ({dur:.0f} s long)")
+            ipc.cmd("seek", 150, "absolute")
+            self.s.wait("seeked", lambda: (ipc.cmd("get_property", "time-pos") or 0) > 150, timeout=20)
+            time.sleep(4.5)  # mpv reports where it is every 2 s
+            r.ok(self.s.exists("//*[contains(@class,'mpv-card')]") and "Faststart Movie" in self.s.text(), "Radiate shows the film playing in mpv")
+        finally:
+            ipc.close()
+        self.leave_player()
+        self.s.wait("mpv closed", lambda: not mpv_pids(), timeout=10)
+        cw = self.s.invoke("continue_watching", {"limit": 10}) or []
+        m = next((x for x in cw if x.get("name") == "Faststart Movie" or x.get("title") == "Faststart Movie"), None)  # type: ignore[union-attr]
+        pos = (m or {}).get("progress") or 0
+        r.ok(m is not None and 0.48 < pos < 0.56, f"leaving keeps the film's place ({pos:.2f} of it)")
+        self.open_movie("Faststart Movie")
+        self.s.click(xp_text("button", "Resume")) or self.s.click(xp_text("button", "Play"))
+        self.s.wait("mpv window", lambda: mpv_pids(), timeout=20)
+        ipc = self.s.wait("mpv ipc", mpv_ipc, timeout=10)
+        try:
+            at = self.s.wait("resumed", lambda: (t := ipc.cmd("get_property", "time-pos")) and t > 1 and t, timeout=30)
+            r.ok(140 <= at <= 175, f"playing it again resumes in mpv at {at:.0f} s")
+        finally:
+            ipc.close()
+        self.leave_player()
+        self.s.wait("mpv closed", lambda: not mpv_pids(), timeout=10)
+
+        # Multiview: the tiles side by side in mpv's one window, sound from the tile in focus
+        self.watch(a["id"])
+        self.s.wait("mpv window", lambda: mpv_pids(), timeout=20)
+        time.sleep(2)
+        self.s.click(xp_text("button", "Multiview"))
+        ipc = None
+        try:
+            def mv_ready():
+                sock = mpv_socket()
+                if not sock or not mpv_pids():
+                    return None
+                c = MpvIpc(sock)
+                lav = str(c.cmd("get_property", "lavfi-complex") or "")
+                ok = "xstack" in lav and (c.cmd("get_property", "time-pos") or 0) > 1
+                if ok:
+                    return c
+                c.close()
+                return None
+            ipc = self.s.wait("multiview in mpv", mv_ready, timeout=40)
+            ext = ipc.cmd("get_property", "external-files") or []
+            ours, prov, _ = self.in_use()
+            r.ok(len(ext) >= 1 and ours == len(ext) + 1 and prov == ours, f"multiview shows {len(ext) + 1} channels in one mpv window (app {ours}, provider {prov})")
+            lav = str(ipc.cmd("get_property", "lavfi-complex"))
+            ipc.cmd("keypress", "RIGHT")
+            self.s.wait("focus moved", lambda: str(ipc.cmd("get_property", "lavfi-complex")) != lav, timeout=10)
+            r.ok(self.s.exists("(//*[contains(@class,'mv-cell')])[2]//*[contains(@class,'focusring')]"), "Right in mpv moves the focus (and the sound) to the next tile, in Radiate too")
+            time.sleep(1)
+            self.xshot("mpv-multiview")
+        finally:
+            if ipc:
+                ipc.close()
+        self.s.click("//button[@aria-label='Back']")
+        self.s.wait("mpv closed", lambda: not mpv_pids(), timeout=15)
+        self.go("settings")
+        self.s.wait("streams closed", lambda: self.in_use()[0] == 0, timeout=15)
+        r.ok(True, "leaving multiview closes mpv and every tile's stream")
+        self.s.invoke("prefs_set", {"patch": {"playInMpv": False, "reactorOverlay": {"size": "m", "side": "left", "volume": 80, "delay": 0}}})
+
+    def x_window(self, name: str) -> dict | None:
+        """An X window by its title: where it is and its size."""
+        out = subprocess.run(["xwininfo", "-root", "-tree", "-display", f":{self.args.display}"], capture_output=True, text=True).stdout
+        for line in out.splitlines():
+            if f'"{name}"' in line:
+                m = re.search(r"(\d+)x(\d+)\+(-?\d+)\+(-?\d+)\s+\+(-?\d+)\+(-?\d+)", line)
+                if m:
+                    w, h, _, _, x, y = (int(v) for v in m.groups())
+                    if w > 1 and h > 1:
+                        return {"w": w, "h": h, "x": x, "y": y}
+        return None
 
     def xshot(self, name: str) -> None:
         """The whole screen (mpv's own window is outside the webview)."""

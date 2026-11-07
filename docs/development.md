@@ -230,6 +230,34 @@ page.
   open-tv's, is preferred. macOS and Linux use the system's mpv; without
   one, channels play in Radiate.
 
+## Decisions (7 November 2026, 0.9.0)
+
+- The owner wants mpv as the only player, with Radiate's extras on top.
+  Everything plays in mpv: channels, catch-up, movies, series and
+  Multiview. "Play here" and the Settings switch are gone; Radiate's own
+  player is used only when no mpv can be found (and by the e2e scenarios
+  that test it, through the hidden `playInMpv: false`).
+- Reactors over mpv: mpv is a window of its own, so each reactor is a small
+  frameless, always-on-top window of Radiate's (`rbox-<id>`, page
+  `#reactorbox/<id>`, `src-tauri/src/float.rs`) with the same box as
+  before. It is moved and resized as a window and remembered in screen
+  pixels (`reactorOverlay.views[id].float`). The main window opens and
+  closes the boxes and owns their sound; the boxes send mute and close back.
+- The delay lives in Radiate's Lua script: mpv keeps a seekable cache
+  (`--demuxer-seekable-cache`, 384 MiB back), and the script seeks back by
+  the delay, or holds the picture until enough has loaded, on the same
+  connection.
+- Movies and series: mpv starts at the saved share (`--start=N%`), reports
+  its position every 2 s and when the file ends (`--keep-open`), so
+  progress, resume and next episode work as before.
+- Multiview: one mpv plays the first tile as the file and the others as
+  `external-files`, laid out with a `lavfi-complex` xstack on a 1920×1080
+  canvas; sound is the focused tile's audio track. The script draws the
+  names and the focus border and sends arrows, Enter and clicks back.
+  Each tile is still one relay session, so the connection count is kept.
+- mpv's IPC waits for the script: Radiate sends `radiate-hello` until the
+  script answers `ready`, and only then sends what it queued.
+
 ## Layout
 
 ```

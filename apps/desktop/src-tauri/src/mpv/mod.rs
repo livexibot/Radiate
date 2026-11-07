@@ -158,7 +158,8 @@ pub fn split_args(s: &str) -> Vec<String> {
 }
 
 struct Launch {
-    url: String,
+    /// What to play at once; None starts idle (Radiate loads it over the control link).
+    url: Option<String>,
     title: String,
     volume: f64,
     muted: bool,
@@ -166,6 +167,7 @@ struct Launch {
     high_quality: bool,
     extra: Vec<String>,
     geometry: Option<String>,
+    start: String,
     ipc: String,
     script: Option<PathBuf>,
 }
@@ -173,14 +175,19 @@ struct Launch {
 fn args(l: &Launch) -> Vec<String> {
     let mut a = vec![
         "--force-window=immediate".to_string(),
-        // Stays open between channels and when a stream ends.
+        // Stays open between channels, and on the last picture when a film ends.
         "--idle=yes".to_string(),
-        "--keep-open=no".to_string(),
+        "--keep-open=yes".to_string(),
+        format!("--start={}", l.start),
         "--title=${media-title} · Radiate".to_string(),
         format!("--force-media-title={}", l.title),
         format!("--input-ipc-server={}", l.ipc),
         "--msg-level=all=error".to_string(),
         "--cache=yes".to_string(),
+        // Live TV can go back through what has arrived: rewinding, and holding the match
+        // back to line up with a reactor.
+        "--demuxer-seekable-cache=yes".to_string(),
+        "--demuxer-max-back-bytes=384MiB".to_string(),
         format!("--volume={}", (l.volume.clamp(0.0, 1.0) * 100.0).round()),
         format!("--mute={}", if l.muted { "yes" } else { "no" }),
         "--osd-bar=yes".to_string(),
@@ -225,7 +232,9 @@ fn args(l: &Launch) -> Vec<String> {
         a.push(format!("--geometry={g}"));
     }
     a.extend(l.extra.iter().cloned());
-    a.push(l.url.clone());
+    if let Some(u) = &l.url {
+        a.push(u.clone());
+    }
     a
 }
 
@@ -287,8 +296,9 @@ pub async fn open(
     state: &AppState,
     target: PlayTarget,
     info: Option<MpvInfo>,
+    resume: Option<f64>,
 ) -> CmdResult<MpvStarted> {
-    // Changing channel in the open window.
+    // Changing channel (or film) in the open window.
     let previous = {
         let mut guard = state.mpv.lock().unwrap();
         guard.as_mut().map(|w| std::mem::take(&mut w.session_id))
@@ -311,7 +321,11 @@ pub async fn open(
             match guard.as_mut() {
                 Some(w) => {
                     w.session_id = started.session_id.clone();
+                    w.send(json!(["script-message", "radiate-multiview", "off"]));
+                    w.send(json!(["set_property", "external-files", []]));
                     w.send(json!(["set_property", "force-media-title", started.title]));
+                    // read when the file loads; Radiate's script puts it back to none then
+                    w.send(json!(["set_property", "start", start_option(resume)]));
                     w.send(json!(["loadfile", started.url, "replace"]));
                     if let Some(i) = &info {
                         w.send(i.command());
@@ -327,17 +341,46 @@ pub async fn open(
             });
         }
         // The window closed meanwhile: start a new one with this session.
-        return spawn(app, state, started, info).await;
+        return spawn(app, state, Load::from(started), info, resume, Vec::new()).await;
     }
     let started = open_session(app, state, target, false).await?;
-    spawn(app, state, started, info).await
+    spawn(app, state, Load::from(started), info, resume, Vec::new()).await
+}
+
+/// What a new mpv window starts with.
+struct Load {
+    /// Played at once; None starts idle for `then` to load.
+    url: Option<String>,
+    title: String,
+    /// The relay session mpv owns (closed with it); empty when it reads others' sessions.
+    session_id: String,
+}
+
+impl From<crate::commands::PlayStarted> for Load {
+    fn from(s: crate::commands::PlayStarted) -> Self {
+        Load {
+            url: Some(s.url),
+            title: s.title,
+            session_id: s.session_id,
+        }
+    }
+}
+
+/// mpv's `start` for a resume point (a share of the length), or none.
+fn start_option(resume: Option<f64>) -> String {
+    match resume {
+        Some(f) if f.is_finite() && f > 0.0 && f < 0.97 => format!("{:.2}%", f * 100.0),
+        _ => "none".to_string(),
+    }
 }
 
 async fn spawn(
     app: &AppHandle,
     state: &AppState,
-    started: crate::commands::PlayStarted,
+    started: Load,
     info: Option<MpvInfo>,
+    resume: Option<f64>,
+    then: Vec<Value>,
 ) -> CmdResult<MpvStarted> {
     let id = started.session_id.clone();
     let Some(mpv) = tauri::async_runtime::spawn_blocking(crate::tools::find_mpv)
@@ -345,7 +388,9 @@ async fn spawn(
         .ok()
         .flatten()
     else {
-        state.hub.close(&id);
+        if !id.is_empty() {
+            state.hub.close(&id);
+        }
         return Err(CmdError::new("mpv_missing", "mpv isn't installed."));
     };
     let prefs = prefs_value(state);
@@ -370,6 +415,7 @@ async fn spawn(
             .map(split_args)
             .unwrap_or_default(),
         geometry: geometry(app),
+        start: start_option(resume),
         ipc: ipc.clone(),
         script: write_script(&state.data_dir)
             .map_err(|e| tracing::warn!("couldn't write the mpv script: {e}"))
@@ -391,7 +437,9 @@ async fn spawn(
         Ok(c) => c,
         Err(e) => {
             tracing::warn!("couldn't start mpv: {e}");
-            state.hub.close(&id);
+            if !id.is_empty() {
+                state.hub.close(&id);
+            }
             return Err(CmdError::new("mpv_failed", "mpv couldn't be started."));
         }
     };
@@ -406,6 +454,9 @@ async fn spawn(
     };
     if let Some(i) = &info {
         window.send(i.command());
+    }
+    for c in then {
+        window.send(c);
     }
     // Only one mpv window: close one that is somehow still there.
     if let Some(old) = state.mpv.lock().unwrap().replace(window) {
@@ -423,7 +474,24 @@ async fn spawn(
             tracing::warn!("couldn't reach mpv's control link at {ipc}");
             return;
         };
+        let (ready_tx, ready_rx) = oneshot::channel::<()>();
+        let mut ready_tx = Some(ready_tx);
+        let hello = format!(
+            "{}\n",
+            json!({ "command": ["script-message", "radiate-hello"] })
+        );
         let write = async move {
+            // Radiate's script answers once it is loaded; what is queued for it waits till then.
+            let mut ready_rx = ready_rx;
+            for _ in 0..40 {
+                if writer.write_all(hello.as_bytes()).await.is_err() {
+                    return;
+                }
+                tokio::select! {
+                    _ = &mut ready_rx => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
+                }
+            }
             while let Some(line) = ipc_rx.recv().await {
                 if writer.write_all(line.as_bytes()).await.is_err() {
                     break;
@@ -444,6 +512,12 @@ async fn spawn(
                     .and_then(Value::as_array)
                     .map(|a| a.iter().filter_map(Value::as_str).collect())
                     .unwrap_or_default();
+                if args.first() == Some(&"radiate") && args.get(1) == Some(&"ready") {
+                    if let Some(tx) = ready_tx.take() {
+                        let _ = tx.send(());
+                    }
+                    continue;
+                }
                 if args.first() == Some(&"radiate") && args.len() >= 2 {
                     let _ = app_ipc.emit(
                         "mpv-command",
@@ -496,8 +570,151 @@ pub async fn mpv_open(
     state: State<'_, AppState>,
     target: PlayTarget,
     info: Option<MpvInfo>,
+    resume: Option<f64>,
 ) -> CmdResult<MpvStarted> {
-    open(&app, &state, target, info).await
+    open(&app, &state, target, info, resume).await
+}
+
+/// Multiview in mpv: the tiles' streams (relay addresses of sessions the tiles
+/// opened; an empty tile is null) side by side in the one window, with the
+/// sound of the tile in focus.
+#[tauri::command]
+pub async fn mpv_multiview(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tiles: Vec<Option<String>>,
+    names: Vec<String>,
+    layout: String,
+    focus: usize,
+) -> CmdResult<()> {
+    let plan = multiview_plan(&tiles, &names, &layout, focus)
+        .ok_or_else(|| CmdError::new("invalid", "Nothing to show."))?;
+    // mpv reads the tiles' sessions; one it owned (a channel played before) is let go.
+    let owned = {
+        let mut guard = state.mpv.lock().unwrap();
+        guard.as_mut().map(|w| std::mem::take(&mut w.session_id))
+    };
+    if let Some(old) = &owned {
+        if !old.is_empty() {
+            state.hub.close(old);
+        }
+        let sent = {
+            let guard = state.mpv.lock().unwrap();
+            match guard.as_ref() {
+                Some(w) => {
+                    for c in &plan.commands {
+                        w.send(c.clone());
+                    }
+                    true
+                }
+                None => false,
+            }
+        };
+        if sent {
+            state.emit_connections(&app);
+            return Ok(());
+        }
+    }
+    let load = Load {
+        url: None,
+        title: "Multiview".into(),
+        session_id: String::new(),
+    };
+    spawn(&app, &state, load, None, None, plan.commands).await?;
+    Ok(())
+}
+
+/// The tile in focus in mpv's multiview (its sound plays).
+#[tauri::command]
+pub async fn mpv_multiview_focus(state: State<'_, AppState>, focus: usize) -> CmdResult<()> {
+    if let Some(w) = state.mpv.lock().unwrap().as_ref() {
+        w.send(json!([
+            "script-message",
+            "radiate-mv-focus",
+            focus.min(3).to_string()
+        ]));
+    }
+    Ok(())
+}
+
+struct MultiviewPlan {
+    commands: Vec<Value>,
+}
+
+/// The commands that show the tiles: the first stream as the file, the others
+/// as external files, and which source each tile shows (0 for none).
+fn multiview_plan(
+    tiles: &[Option<String>],
+    names: &[String],
+    layout: &str,
+    focus: usize,
+) -> Option<MultiviewPlan> {
+    let local = |u: &String| u.starts_with("http://127.0.0.1:");
+    let mut files: Vec<String> = Vec::new();
+    let mut slots: Vec<String> = Vec::new();
+    for t in tiles.iter().take(4) {
+        match t {
+            Some(u) if local(u) => {
+                files.push(u.clone());
+                slots.push(files.len().to_string());
+            }
+            _ => slots.push("0".into()),
+        }
+    }
+    while slots.len() < 4 {
+        slots.push("0".into());
+    }
+    let first = files.first()?.clone();
+    let layout = if layout == "1+3" { "1+3" } else { "2x2" };
+    let clean = |s: &str| -> String { s.chars().filter(|c| !c.is_control()).take(60).collect() };
+    let mut msg = vec![
+        json!("script-message"),
+        json!("radiate-multiview"),
+        json!(layout),
+        json!(focus.min(3).to_string()),
+        json!(slots.join(",")),
+    ];
+    for i in 0..4 {
+        msg.push(json!(clean(names.get(i).map(String::as_str).unwrap_or(""))));
+    }
+    Some(MultiviewPlan {
+        commands: vec![
+            json!(["set_property", "external-files", files[1..].to_vec()]),
+            json!(["set_property", "start", "none"]),
+            json!(["set_property", "force-media-title", "Multiview"]),
+            Value::Array(msg),
+            json!(["loadfile", first, "replace"]),
+        ],
+    })
+}
+
+/// Holds the match back by this many seconds (to line up with a reactor),
+/// going back through what mpv already has first.
+#[tauri::command]
+pub async fn mpv_delay(state: State<'_, AppState>, seconds: f64) -> CmdResult<()> {
+    let s = if seconds.is_finite() {
+        seconds.clamp(0.0, 600.0)
+    } else {
+        0.0
+    };
+    if let Some(w) = state.mpv.lock().unwrap().as_ref() {
+        w.send(json!([
+            "script-message",
+            "radiate-delay",
+            format!("{s:.1}")
+        ]));
+    }
+    Ok(())
+}
+
+/// A short message in the middle of mpv's picture.
+#[tauri::command]
+pub async fn mpv_message(state: State<'_, AppState>, text: String) -> CmdResult<()> {
+    if let Some(w) = state.mpv.lock().unwrap().as_ref() {
+        let t: String = text.chars().filter(|c| !c.is_control()).take(200).collect();
+        w.message(&t);
+    }
+    Ok(())
 }
 
 /// Updates the banner (and shows it for `info.show` seconds).
@@ -541,7 +758,7 @@ mod tests {
     #[test]
     fn launch_plays_the_relay_with_radiates_script_and_look() {
         let l = Launch {
-            url: "http://127.0.0.1:5/s/abc".into(),
+            url: Some("http://127.0.0.1:5/s/abc".into()),
             title: "Arena Sports 1".into(),
             volume: 0.55,
             muted: false,
@@ -549,6 +766,7 @@ mod tests {
             high_quality: false,
             extra: vec!["--cache-secs=30".into()],
             geometry: Some("1280x720+10+20".into()),
+            start: start_option(Some(0.425)),
             ipc: "/tmp/x.sock".into(),
             script: Some(PathBuf::from("/data/mpv/radiate.lua")),
         };
@@ -564,10 +782,61 @@ mod tests {
             "--geometry=1280x720+10+20",
             "--script-opts-append=osc-layout=bottombar",
             "--cache-secs=30",
+            "--start=42.50%",
+            "--demuxer-seekable-cache=yes",
         ] {
             assert!(a.iter().any(|x| x == want), "missing {want} in {a:?}");
         }
         assert!(!a.iter().any(|x| x.starts_with("--vo=")));
+    }
+
+    #[test]
+    fn multiview_loads_the_first_tile_and_adds_the_rest() {
+        let t = |u: &str| Some(u.to_string());
+        let plan = multiview_plan(
+            &[
+                t("http://127.0.0.1:9/s/a"),
+                None,
+                t("http://127.0.0.1:9/s/c"),
+                t("https://evil/x"),
+            ],
+            &["A".into(), "".into(), "C\nx".into()],
+            "1+3",
+            2,
+        )
+        .unwrap();
+        assert_eq!(
+            plan.commands[0],
+            json!(["set_property", "external-files", ["http://127.0.0.1:9/s/c"]])
+        );
+        assert_eq!(
+            plan.commands[3],
+            json!([
+                "script-message",
+                "radiate-multiview",
+                "1+3",
+                "2",
+                "1,0,2,0",
+                "A",
+                "",
+                "Cx",
+                ""
+            ])
+        );
+        assert_eq!(
+            plan.commands[4],
+            json!(["loadfile", "http://127.0.0.1:9/s/a", "replace"])
+        );
+        assert!(multiview_plan(&[None, None], &[], "2x2", 0).is_none());
+    }
+
+    #[test]
+    fn resume_points_become_mpv_start_shares() {
+        assert_eq!(start_option(None), "none");
+        assert_eq!(start_option(Some(0.0)), "none");
+        assert_eq!(start_option(Some(0.99)), "none");
+        assert_eq!(start_option(Some(f64::NAN)), "none");
+        assert_eq!(start_option(Some(0.5)), "50.00%");
     }
 
     #[test]

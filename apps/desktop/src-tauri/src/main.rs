@@ -4,6 +4,7 @@
 mod background;
 mod commands;
 mod error;
+mod float;
 mod mpv;
 mod recording;
 mod secrets;
@@ -139,6 +140,12 @@ fn main() {
             mpv::mpv_open,
             mpv::mpv_info,
             mpv::mpv_stop,
+            mpv::mpv_delay,
+            mpv::mpv_multiview,
+            mpv::mpv_multiview_focus,
+            float::reactor_float_open,
+            float::reactor_float_close,
+            mpv::mpv_message,
             commands::app_info,
             commands::opentv_find,
             commands::opentv_import,

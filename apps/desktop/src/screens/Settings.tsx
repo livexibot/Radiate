@@ -615,14 +615,9 @@ function MpvSettings() {
   const { prefs, setPrefs } = useApp();
   const [extra, setExtra] = useState(prefs?.mpvArgs ?? "");
   if (!prefs) return null;
-  const on = prefs.playInMpv !== false;
   return (
     <section className="set-card" data-ui="settings-card">
       <h3>mpv</h3>
-      <div className="set-row">
-        <span>Play channels in mpv</span>
-        <input type="checkbox" className="toggle" checked={on} onChange={(e) => void setPrefs({ playInMpv: e.target.checked })} aria-label="Play channels in mpv" />
-      </div>
       <div className="set-row">
         <span>Hardware decoding</span>
         <input type="checkbox" className="toggle" checked={prefs.mpvHwdec !== false} onChange={(e) => void setPrefs({ mpvHwdec: e.target.checked })} aria-label="Hardware decoding" />

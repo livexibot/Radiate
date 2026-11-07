@@ -23,6 +23,7 @@ import { boxPrefs, layoutBoxes, placeMatch, type BoxPrefs, type Rect } from "../
 import { ReactorIcon } from "../reactor/icon";
 import { MAX_REACTORS, viewOf, type Reactor } from "../reactor/link";
 import { ReactorMenu } from "../reactor/ReactorMenu";
+import { closeFloat, onAction, onClosed, onMoved, openFloat, sendView } from "../reactor/float";
 import { ReactorOverlay } from "../reactor/ReactorOverlay";
 import { reactorSession, useReactors } from "../reactor/useReactors";
 import { useApp, type Route, type ZapContext } from "../state/app";
@@ -77,10 +78,8 @@ export function Player({ route }: { route: PlayerRoute }) {
   const tick = useNow(1_000);
 
   const [mpvSession, setMpvSession] = useState<string | null>(null);
-  // Channels play in mpv (like open-tv) unless that's turned off, or "Play here" was chosen
-  // for this visit (reactors and multiview use Radiate's own player).
-  const [here, setHere] = useState(false);
-  const mpvMode = !!prefs && prefs.playInMpv !== false && mpv && isChannel && !here;
+  // Everything plays in mpv, like open-tv; Radiate's own player only when there is no mpv.
+  const mpvMode = !!prefs && prefs.playInMpv !== false && mpv;
   const { state, retry, tryAnyway, fail } = useStream(mpvSession || mpvMode ? null : target);
   const recordings = useRecordings();
   const sessionId = mpvSession ?? (state.status === "ready" ? state.stream.sessionId : null);
@@ -139,7 +138,7 @@ export function Player({ route }: { route: PlayerRoute }) {
   const muted = prefs?.muted ?? false;
 
   // reset per target
-  const tkey = `${target.type}:${target.id}`;
+  const tkey = `${target.type}:${target.id}${target.type === "catchup" ? `:${target.start}` : ""}`;
   useEffect(() => {
     setFatal(null);
     setMpvSession(null);
@@ -155,12 +154,15 @@ export function Player({ route }: { route: PlayerRoute }) {
     appliedPrefFor.current = null;
   }, [tkey]);
 
-  // Play in mpv: each channel in the same mpv window, as it comes.
+  // Play in mpv: everything in the same mpv window, as it comes.
   const mpvClosing = useRef(false);
+  // Where a film is in mpv, for its progress; kept per item so a position never lands on the next one.
+  const mpvTime = useRef<{ key: string; cur: number; dur: number } | null>(null);
   useEffect(() => {
     if (!mpvMode) return;
     let alive = true;
-    api.mpvOpen(target).then(
+    mpvTime.current = null;
+    api.mpvOpen(target, null, isChannel || isCatchup ? null : (route.resume ?? null)).then(
       (r) => {
         if (alive) setMpvSession(r.sessionId);
         // left the player while mpv was starting
@@ -173,7 +175,7 @@ export function Player({ route }: { route: PlayerRoute }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mpvMode, tkey]);
-  // Leaving the player, or playing here instead: close the mpv window.
+  // Leaving the player: close the mpv window.
   useEffect(() => {
     if (!mpvMode) return;
     mpvClosing.current = false;
@@ -182,17 +184,6 @@ export function Player({ route }: { route: PlayerRoute }) {
       void api.mpvStop().catch(() => undefined);
     };
   }, [mpvMode]);
-  // Play here instead: mpv's stream closes first, so an account with one connection has room.
-  const playHere = useCallback(() => {
-    mpvClosing.current = true;
-    void api
-      .mpvStop()
-      .catch(() => undefined)
-      .then(() => {
-        setMpvSession(null);
-        setHere(true);
-      });
-  }, []);
 
   // channel info, now/next, last/previous channel prefs
   useEffect(() => {
@@ -271,6 +262,83 @@ export function Player({ route }: { route: PlayerRoute }) {
     else setMenu("reactor");
   }, [shown.length, reactors.reactors, showReactors]);
   const laidOut = useMemo(() => (shown.length && area.w > 0 && area.h > 0 ? layoutBoxes(shown.map((r) => r.id), reactors.overlay, area.w, area.h) : []), [shown, reactors.overlay, area.w, area.h]);
+
+  // Over mpv, each reactor is a small window of its own that stays on top of mpv's picture.
+  const floating = mpvMode && isChannel;
+  const opened = useRef<Set<string>>(new Set());
+  const reactorsRef = useRef(reactors);
+  reactorsRef.current = reactors;
+  useEffect(() => {
+    if (!floating) return;
+    const want = new Set(shown.map((r) => r.id));
+    for (const id of [...opened.current]) {
+      if (want.has(id)) continue;
+      opened.current.delete(id);
+      void closeFloat(id).catch(() => undefined);
+    }
+    shown.forEach((r, i) => {
+      const box = laidOut[i];
+      if (opened.current.has(r.id) || !box) return;
+      opened.current.add(r.id);
+      const v = viewOf(reactorsRef.current.overlay, r.id);
+      openFloat(r.id, r.name, box, v.float ?? null).catch((e) => {
+        opened.current.delete(r.id);
+        toast(errorMessage(e), "bad");
+      });
+    });
+  }, [floating, shown, laidOut, toast]);
+  useEffect(() => {
+    if (!floating) return;
+    const was = opened.current;
+    return () => {
+      was.clear();
+      void closeFloat().catch(() => undefined);
+    };
+  }, [floating]);
+  // Their buttons, and where they were left.
+  useEffect(() => {
+    if (!floating) return;
+    let alive = true;
+    let offs: (() => void)[] = [];
+    const timers = new Map<string, number>();
+    void Promise.all([
+      onAction((a) => {
+        const r = reactorsRef.current;
+        if (a.action === "close") showReactors((ids) => ids.filter((x) => x !== a.id));
+        else void r.setView(a.id, { muted: !viewOf(r.overlay, a.id).muted });
+      }),
+      onMoved(({ id, x, y, w, h }) => {
+        window.clearTimeout(timers.get(id));
+        timers.set(
+          id,
+          window.setTimeout(() => void reactorsRef.current.setView(id, { float: { x, y, w, h } }), 700),
+        );
+      }),
+      onClosed(({ id }) => {
+        if (!opened.current.delete(id)) return;
+        showReactors((ids) => ids.filter((x) => x !== id));
+      }),
+    ]).then((fs) => (alive ? (offs = fs) : fs.forEach((f) => f())));
+    return () => {
+      alive = false;
+      offs.forEach((f) => f());
+      timers.forEach((t) => window.clearTimeout(t));
+    };
+  }, [floating, showReactors]);
+  // Their sound follows the menu.
+  useEffect(() => {
+    if (!floating) return;
+    for (const r of shown) {
+      const v = viewOf(reactors.overlay, r.id);
+      void sendView({ id: r.id, volume: v.volume, muted: v.muted }).catch(() => undefined);
+    }
+  }, [floating, shown, reactors.overlay]);
+  // The match held back to line up with them, in mpv.
+  useEffect(() => {
+    if (!mpvSession) return;
+    void api.mpvDelay(isChannel && shown.length ? reactors.overlay.delay : 0).catch(() => undefined);
+  }, [mpvSession, isChannel, shown.length, reactors.overlay.delay]);
+
   const keepChrome = menu !== null || listOpen || ctxMenu !== null || state.status !== "ready" || !!fatal || paused;
 
   // VOD progress: every 10 s, on pause, at the end and on stop. Read from the video element
@@ -280,9 +348,9 @@ export function Player({ route }: { route: PlayerRoute }) {
     if (isChannel || isCatchup) return;
     const id = target.id;
     const save = () => {
+      const m = mpvTime.current;
       const c = control.current;
-      if (!c) return;
-      const [at, dur] = [c.position(), c.duration()];
+      const [at, dur] = m ? (m.key === id ? [m.cur, m.dur] : [NaN, NaN]) : c ? [c.position(), c.duration()] : [NaN, NaN];
       if (shouldSaveProgress(at, dur)) void api.progressSet(id, at, dur).catch(() => undefined);
     };
     saveProgress.current = save;
@@ -296,7 +364,12 @@ export function Player({ route }: { route: PlayerRoute }) {
 
   // next episode
   const nextUp = useNextEpisode(target);
-  const phase = nextPhase({ hasNext: !!nextUp && !fatal && state.status === "ready", current: time.cur, duration: time.dur, ended, cancelled: nextCancelled });
+  const phase = nextPhase({ hasNext: !!nextUp && !fatal && (state.status === "ready" || !!mpvSession), current: time.cur, duration: time.dur, ended, cancelled: nextCancelled });
+  // In mpv, where you are looking.
+  useEffect(() => {
+    if (!mpvSession || phase !== "countdown" || !nextUp) return;
+    void api.mpvMessage(`Next: ${episodeTitle(nextUp.seriesName, nextUp.episode)}`).catch(() => undefined);
+  }, [mpvSession, phase, nextUp]);
   const playNext = useCallback(() => {
     if (!nextUp) return;
     const e = nextUp.episode;
@@ -410,8 +483,13 @@ export function Player({ route }: { route: PlayerRoute }) {
   const goLive = useCallback(() => navigate({ name: "player", target: { type: "channel", id: target.id } }, { replace: true }), [navigate, target.id]);
 
   // Keys pressed in the mpv window come back here.
-  const mpvKeys = useRef({ zapBy, previousChannel, toggleRecord, number: (n: number) => void n });
+  const mpvKeys = useRef({ zapBy, previousChannel, toggleRecord, toggleReactor, number: (n: number) => void n, id: target.id, ready: false, vod: false, save: () => undefined as void });
   mpvKeys.current = {
+    toggleReactor,
+    id: target.id,
+    ready: !!mpvSession,
+    vod: !isChannel && !isCatchup,
+    save: () => saveProgress.current(),
     zapBy,
     previousChannel,
     toggleRecord,
@@ -429,6 +507,21 @@ export function Player({ route }: { route: PlayerRoute }) {
       else if (action === "number" && Number(value) > 0) k.number(Number(value));
       else if (action === "previous") k.previousChannel();
       else if (action === "record") void k.toggleRecord();
+      else if (action === "reactors") k.toggleReactor();
+      else if (!k.ready) return;
+      else if (action === "time") {
+        const [cur, dur] = value.split(" ").map(Number);
+        if (!Number.isFinite(cur) || !Number.isFinite(dur)) return;
+        mpvTime.current = { key: k.id, cur, dur };
+        setTime({ cur, dur });
+        if (cur < dur - 2) setEnded(false);
+      } else if (action === "pause") {
+        setPaused(value === "1");
+        if (value === "1" && k.vod) k.save();
+      } else if (action === "ended" && k.vod) {
+        setEnded(true);
+        k.save();
+      }
     });
     const offClosed = api.on("mpv-closed", () => {
       if (!mpvClosing.current) leave();
@@ -460,6 +553,15 @@ export function Player({ route }: { route: PlayerRoute }) {
       })
       .catch(() => undefined);
   }, [mpvMode, mpvSession, channel, nn, target.id, tkey, now]);
+  // Films and catch-up: their title, once.
+  useEffect(() => {
+    if (!mpvMode || !mpvSession || isChannel || bannerFor.current === tkey) return;
+    if (isCatchup && !channel) return;
+    bannerFor.current = tkey;
+    void api
+      .mpvInfo({ live: false, number: "", name: isCatchup ? (channel?.name ?? "") : "", title: route.title ?? "", time: "", next: "", progress: -1, show: 4 })
+      .catch(() => undefined);
+  }, [mpvMode, mpvSession, isChannel, isCatchup, channel, route.title, tkey]);
 
   const openContext = useCallback(() => {
     if (!channel) return;
@@ -599,7 +701,6 @@ export function Player({ route }: { route: PlayerRoute }) {
           navigate({ name: "guide" });
           return;
         case "r":
-          if (mpvMode) playHere();
           if (isChannel) toggleReactor();
           return;
         case "c":
@@ -693,7 +794,10 @@ export function Player({ route }: { route: PlayerRoute }) {
         now={nn?.now?.channelId === target.id ? nn.now : null}
         next={nn?.next?.channelId === target.id ? nn.next : null}
         at={now}
-        onHere={mpvMode ? playHere : undefined}
+        live={isChannel}
+        title={isChannel ? undefined : title}
+        sub={isCatchup ? (channel?.name ?? undefined) : undefined}
+        progress={!isChannel && time.dur > 0 ? time.cur / time.dur : null}
         onStop={() => {
           mpvClosing.current = true;
           void api.mpvStop().catch(() => undefined);
@@ -793,7 +897,7 @@ export function Player({ route }: { route: PlayerRoute }) {
       </div>
       <div className="pshade" />
 
-      {shown.map((r, i) => {
+      {(mpvMode ? [] : shown).map((r, i) => {
         const rect = boxes[i];
         if (!rect) return null;
         const view = viewOf(reactors.overlay, r.id);

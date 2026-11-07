@@ -330,9 +330,15 @@ messages back up as `{ radiate: "yt", data }`.
 | `settings_export` | `{ path, includeSecrets }` | (writes the JSON file; the UI picks `path` with the dialog plugin's `save()`) |
 | `settings_import` | `{ path }` | (the UI picks `path` with `open()`) |
 | `mpv_available` | | `boolean` |
-| `mpv_open` | `{ target: PlayTarget, info?: MpvInfo }` | `{ sessionId }`: plays the target in Radiate's mpv window, starting it if needed, or in the window already open (its stream is closed first, so a channel change never takes a second connection). mpv reads from the relay, so it counts against the limit too |
+| `mpv_open` | `{ target: PlayTarget, info?: MpvInfo, resume?: number }` | `{ sessionId }`: plays the target in Radiate's mpv window, starting it if needed, or in the window already open (its stream is closed first, so a channel change never takes a second connection). `resume` (0..1) starts a movie or episode at that share. mpv reads from the relay, so it counts against the limit too |
 | `mpv_info` | `{ info: MpvInfo }` | sets mpv's channel banner: `{ live, number, name, title, time, next, progress (0..1, or -1), show (seconds; 0 updates it without showing it) }` |
 | `mpv_stop` | | closes the mpv window and its stream |
+| `mpv_delay` | `{ seconds }` | keeps live TV that many seconds behind (0 for none), going back through mpv's cache |
+| `mpv_message` | `{ text }` | shows a line on mpv's picture |
+| `mpv_multiview` | `{ tiles: (string \| null)[], names: string[], layout: "2x2" \| "1+3", focus }` | plays the tiles' relay URLs together in the mpv window (only `http://127.0.0.1:` URLs) |
+| `mpv_multiview_focus` | `{ focus }` | moves Multiview's highlight and sound to that tile |
+| `reactor_float_open` | `{ id, title, rect, screen? }` | opens the reactor's box over mpv (`rbox-<id>`): at `screen` (logical screen pixels), else over `rect` (CSS pixels of the main window); shows it if it is open |
+| `reactor_float_close` | `{ id? }` | closes the reactor's box, or without an id all of them |
 | `app_info` | | `{ version, dataDir }` |
 | `youtube_resolve` | `{ url }` | `{ kind: "video" \| "channel", videoId, channelId, title }` (handles like `@name` are looked up on youtube.com) |
 | `youtube_live_now` | `{ channelId }` | `string \| null`, the video the channel is streaming live now |
@@ -359,8 +365,13 @@ camelCase), `connections-changed` (ConnectionUsage[]), `reactor-window`
 `recordings-changed` (ActiveRecording[]), `recording-saved`
 (`{ path, bytes }`), `sources-changed` (a source was added or removed
 behind the UI's back, e.g. My channels), `mpv-command` (`{ action, value }`: a key pressed
-in the mpv window, `zap` with -1 or 1, `number`, `previous` or `record`), `mpv-closed`
-(`{ sessionId }`: the mpv window closed).
+in the mpv window, `zap` with -1 or 1, `number`, `previous`, `record` or `reactors`;
+`time` ("pos dur" in seconds, every 2 s), `pause` (1 or 0) and `ended` for movies;
+`mv-focus`, `mv-promote` and `mv-move` (an arrow key) in Multiview), `mpv-closed`
+(`{ sessionId }`: the mpv window closed), `reactor-float-moved` (`{ id, x, y, w, h }`,
+logical screen pixels) and `reactor-float-closed` (`{ id }`) from the reactor boxes to the
+main window, `reactor-view` (`{ id, volume, muted }`, main window to the boxes) and
+`reactor-float-action` (`{ id, action: "close" | "mute" }`, a box to the main window).
 
 ## 4. UI (apps/desktop/src)
 
