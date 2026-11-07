@@ -25,7 +25,9 @@ import os
 import shutil
 import sqlite3
 import signal
+import socket
 import subprocess
+import tempfile
 import sys
 import time
 import urllib.error
@@ -366,6 +368,47 @@ def ffprobe(path: str) -> tuple[float, set[str]]:
     ).stdout
     j = json.loads(out or "{}")
     return float(j.get("format", {}).get("duration") or 0), {x["codec_type"] for x in j.get("streams", [])}
+
+
+
+class MpvIpc:
+    """Talks to the app's mpv window over its JSON IPC socket, the way a remote would."""
+
+    def __init__(self, path: str):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(5)
+        self.sock.connect(path)
+        self.buf = b""
+        self.n = 0
+
+    def cmd(self, *args: object) -> object:
+        self.n += 1
+        rid = 9000 + self.n
+        self.sock.sendall(json.dumps({"command": list(args), "request_id": rid}).encode() + b"\n")
+        end = time.time() + 5
+        while time.time() < end:
+            while b"\n" in self.buf:
+                line, self.buf = self.buf.split(b"\n", 1)
+                msg = json.loads(line or b"{}")
+                if msg.get("request_id") == rid:
+                    return msg.get("data") if msg.get("error") == "success" else None
+            self.buf += self.sock.recv(65536)
+        return None
+
+    def close(self) -> None:
+        self.sock.close()
+
+
+def mpv_pids() -> list[int]:
+    """mpv windows the app started (they load Radiate's script)."""
+    out = subprocess.run(["pgrep", "-f", "mpv/radiate.lua"], capture_output=True, text=True).stdout.split()
+    return [int(x) for x in out]
+
+
+def mpv_socket() -> str | None:
+    import glob
+    socks = sorted(glob.glob(os.path.join(tempfile.gettempdir(), "radiate-mpv-*.sock")), key=os.path.getmtime)
+    return socks[-1] if socks else None
 
 
 def provider_stats(port: int) -> dict:
@@ -812,6 +855,97 @@ class Run:
         ours, prov, _ = self.in_use()
         r.ok(ours == 0, f"mkv: no connection left open (app {ours}, provider {prov})")
         r.ok(self.converters() == 0, f"no ffmpeg left running ({self.converters()})")
+
+    def mpv(self) -> None:
+        """Channels open in mpv by default, like open-tv: one mpv window that plays the relay, Up / Down
+        and numbers typed in mpv change channel in the same window on one connection, Backspace goes
+        back, Play here moves to Radiate's own player, and closing mpv leaves the player."""
+        r = self.r
+        if not shutil.which("mpv"):
+            r.note("mpv isn't installed; skipped")
+            return
+        self.s.invoke("prefs_set", {"patch": {"playInMpv": True, "liveFormat": "ts", "latency": "normal"}})
+        chans = self.s.invoke("channels_list", {"query": {"favoritesOnly": False, "includeHidden": False, "offset": 0, "limit": 50}})["items"]  # type: ignore[index]
+        chans = sorted((c for c in chans if c.get("number")), key=lambda c: c["number"])
+        a, b, c3 = chans[0], chans[1], chans[2]
+        self.go("settings")
+        self.s.wait("no sessions", lambda: self.in_use()[0] == 0, timeout=10)
+        self.watch(a["id"])
+        pids = self.s.wait("mpv window", lambda: mpv_pids(), timeout=20)
+        sock = self.s.wait("mpv socket", lambda: mpv_socket(), timeout=10)
+        ipc = self.s.wait("mpv ipc", lambda: MpvIpc(sock), timeout=10)
+        try:
+            pos = self.s.wait("mpv playing", lambda: (t := ipc.cmd("get_property", "time-pos")) and t > 2 and t, timeout=30)
+            path = str(ipc.cmd("get_property", "path") or "")
+            r.ok(path.startswith("http://127.0.0.1:"), f"mpv plays the channel through the relay ({pos:.1f} s in, {path[:30]})")
+            self.xshot("mpv-banner")  # the banner is up for its first seconds
+            r.ok(self.s.exists("//*[contains(@class,'mpv-card')]") and a["name"] in self.s.text(), "Radiate shows the channel playing in mpv")
+            title = str(ipc.cmd("get_property", "media-title") or "")
+            r.ok(a["name"] in title, f"the mpv window is named after the channel ({title})")
+            ours, prov, _ = self.in_use()
+            r.ok(ours == 1 and prov == 1, f"one connection (app {ours}, provider {prov})")
+
+            def on(ch: dict) -> bool:
+                return ch["name"] in str(ipc.cmd("get_property", "media-title") or "") and self.s.exists(xp_text("*[contains(@class,'mpv-card')]//*", ch["name"]))
+
+            ipc.cmd("keypress", "DOWN")
+            self.s.wait(f"zap to {b['name']}", lambda: on(b), timeout=20)
+            self.s.wait("mpv playing again", lambda: (t := ipc.cmd("get_property", "time-pos")) and t > 1, timeout=30)
+            ours, prov, peak = self.in_use()
+            r.ok(mpv_pids() == pids, f"Down in mpv zaps in the same window ({mpv_pids()} was {pids})")
+            r.ok(ours == 1 and prov == 1, f"still one connection after zapping (app {ours}, provider {prov})")
+            for d in str(c3["number"]):
+                ipc.cmd("keypress", d)
+            self.s.wait(f"number {c3['number']}", lambda: on(c3), timeout=20)
+            r.ok(True, f"typing {c3['number']} in mpv opens {c3['name']}")
+            ipc.cmd("keypress", "BS")
+            self.s.wait("previous channel", lambda: on(b), timeout=20)
+            r.ok(True, "Backspace in mpv goes back to the previous channel")
+            ipc.cmd("keypress", "UP")
+            self.s.wait(f"zap up to {a['name']}", lambda: on(a), timeout=20)
+            r.ok(mpv_pids() == pids, "Up zaps back, still the same window")
+            self.s.wait("mpv playing", lambda: (t := ipc.cmd("get_property", "time-pos")) and t > 1, timeout=30)
+            ours, prov, _ = self.in_use()
+            r.ok(ours == 1 and prov == 1, f"one connection after five channels (app {ours}, provider {prov})")
+            self.shot("mpv-card")
+        finally:
+            ipc.close()
+        # Play here: mpv closes and Radiate's own player takes over
+        self.s.click(xp_text("button", "Play here"))
+        self.s.wait("mpv closed", lambda: not mpv_pids(), timeout=10)
+        v = self.wait_playing(min_t=1, timeout=30)
+        ours, prov, _ = self.in_use()
+        r.ok(v["w"] > 0 and ours == 1 and prov <= 1, f"Play here plays in Radiate on one connection (app {ours}, provider {prov})")
+        self.leave_player()
+        self.s.wait("stopped", lambda: self.in_use()[0] == 0, timeout=10)
+        # Closing the mpv window leaves the player
+        self.watch(a["id"])
+        self.s.wait("mpv window", lambda: mpv_pids(), timeout=20)
+        sock = self.s.wait("mpv socket", lambda: mpv_socket(), timeout=10)
+        ipc = self.s.wait("mpv ipc", lambda: MpvIpc(sock), timeout=10)
+        self.s.wait("mpv playing", lambda: (t := ipc.cmd("get_property", "time-pos")) and t > 1, timeout=30)
+        try:
+            ipc.cmd("quit")
+        except OSError:
+            pass
+        ipc.close()
+        self.s.wait("player left", lambda: not self.s.exists("//*[contains(@class,'mpv-card')]"), timeout=10)
+        self.s.wait("stream closed", lambda: self.in_use()[0] == 0, timeout=10)
+        r.ok(not mpv_pids(), "closing mpv leaves the player and closes the stream")
+        # Stop in Radiate closes mpv
+        self.watch(b["id"])
+        self.s.wait("mpv window", lambda: mpv_pids(), timeout=20)
+        time.sleep(2)
+        self.s.click(xp_text("button", "Stop"))
+        self.s.wait("mpv closed", lambda: not mpv_pids(), timeout=10)
+        self.s.wait("stream closed", lambda: self.in_use()[0] == 0, timeout=10)
+        r.ok(True, "Stop closes mpv and the stream")
+        self.s.invoke("prefs_set", {"patch": {"playInMpv": False}})
+
+    def xshot(self, name: str) -> None:
+        """The whole screen (mpv's own window is outside the webview)."""
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "x11grab", "-video_size", "1600x900", "-i", f":{self.args.display}", "-frames:v", "1",
+                        os.path.join(self.args.run_dir, f"{name}.png")], check=False)
 
     def convert(self) -> None:
         """An MPEG-2 channel with MP2 sound (no picture the webview can read) plays converted to
@@ -1440,7 +1574,7 @@ class Run:
         r.ok(not st["refused"] and st["peak"] <= 2, f"provider limit never exceeded (peak {st['peak']}, refused {len(st['refused'])})")
 
 
-SCENARIOS = ["movein", "source", "launch", "movies", "seek", "resume", "hlsvod", "mkv", "convert", "series", "live", "rewind", "search", "reactor", "record", "catchup", "limit", "stall"]
+SCENARIOS = ["movein", "source", "launch", "movies", "seek", "resume", "hlsvod", "mkv", "convert", "series", "live", "rewind", "search", "reactor", "record", "catchup", "limit", "stall", "mpv"]
 
 
 def run(args: argparse.Namespace) -> None:
@@ -1449,6 +1583,10 @@ def run(args: argparse.Namespace) -> None:
     if "all" in names:
         names = SCENARIOS
     rr = Run(s, args)
+    try:
+        s.invoke("prefs_set", {"patch": {"playInMpv": False}})  # the other scenarios check Radiate's own player
+    except RuntimeError:
+        pass
     for n in names:
         print(f"== {n}", flush=True)
         try:

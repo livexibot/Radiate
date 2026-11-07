@@ -60,7 +60,11 @@ at once with their own sound),
 `limit` (a one-stream account whose count lags: zapping never shows the
 limit card; a stream reported on another device does, the card checks again
 by itself, and Play anyway asks the provider), `stall` (a frozen live picture
-becomes the failure card). `source` must run first in a fresh app; without a system
+becomes the failure card), `mpv` (needs `mpv` installed: a channel opens in mpv on the
+relay; Up / Down, a typed number and Backspace sent to mpv's IPC change channel in the same
+window on one connection; Play here, closing mpv and Stop; `run/mpv-banner.png` is the
+whole screen with mpv's banner). The other scenarios turn Play in mpv off first.
+`source` must run first in a fresh app; without a system
 keyring the password lives in memory, so start with `up --fresh` after each
 `down`.
 

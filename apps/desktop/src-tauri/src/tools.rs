@@ -106,9 +106,24 @@ fn on_path(names: &[&str]) -> Option<PathBuf> {
         .find(|p| is_file(p))
 }
 
-/// The mpv executable, from PATH first, then the usual install locations.
+/// The mpv installed with Radiate (Windows), next to its executable.
+fn bundled_mpv() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let name = if cfg!(windows) {
+        "radiate-mpv.exe"
+    } else {
+        "radiate-mpv"
+    };
+    Some(exe.parent()?.join(name)).filter(|p| is_file(p))
+}
+
+/// The mpv executable: the user's own (PATH, then the usual install
+/// locations) so their mpv.conf and version win, else the one installed
+/// with Radiate.
 pub fn find_mpv() -> Option<PathBuf> {
-    on_path(exe_names()).or_else(|| common_locations().into_iter().find(|p| is_file(p)))
+    on_path(exe_names())
+        .or_else(|| common_locations().into_iter().find(|p| is_file(p)))
+        .or_else(bundled_mpv)
 }
 
 /// ffmpeg: the copy installed with Radiate (next to its executable), else

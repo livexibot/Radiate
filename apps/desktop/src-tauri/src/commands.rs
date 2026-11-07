@@ -2,7 +2,6 @@
 //! docs/contract.md section 3.
 
 use std::collections::HashMap;
-use std::process::Stdio;
 use std::sync::Arc;
 
 use radiate_core::{
@@ -12,8 +11,7 @@ use radiate_core::{
 };
 use radiate_stream::{ConnectionUsage, OpenError, OpenRequest, StreamKind};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::sync::oneshot;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::background::{emit_all_sources, progress_emitter};
 use crate::error::{CmdError, CmdResult};
@@ -433,64 +431,6 @@ pub async fn mpv_available() -> CmdResult<bool> {
             .await
             .unwrap_or(false),
     )
-}
-
-#[tauri::command]
-pub async fn mpv_open(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    target: PlayTarget,
-) -> CmdResult<MpvStarted> {
-    let Some(mpv) = tauri::async_runtime::spawn_blocking(crate::tools::find_mpv)
-        .await
-        .ok()
-        .flatten()
-    else {
-        return Err(CmdError::new("mpv_missing", "mpv isn't installed."));
-    };
-    let started = open_session(&app, &state, target, false).await?;
-    let id = started.session_id.clone();
-
-    let mut cmd = tokio::process::Command::new(&mpv);
-    cmd.arg("--force-window=immediate")
-        .arg(format!("--title={}", started.title))
-        .arg(&started.url)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-    #[cfg(windows)]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("couldn't start mpv: {e}");
-            state.hub.close(&id);
-            return Err(CmdError::new("mpv_failed", "mpv couldn't be started."));
-        }
-    };
-
-    let (tx, rx) = oneshot::channel::<()>();
-    state.mpv.lock().unwrap().insert(id.clone(), tx);
-    let app2 = app.clone();
-    let sid = id.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::select! {
-            _ = child.wait() => {}
-            _ = rx => {
-                let _ = child.kill().await;
-            }
-        }
-        // mpv is gone: free its connection.
-        if let Some(state) = app2.try_state::<AppState>() {
-            state.mpv.lock().unwrap().remove(&sid);
-            state.hub.close(&sid);
-        }
-    });
-    Ok(MpvStarted { session_id: id })
 }
 
 // ---------------------------------------------------------------------------

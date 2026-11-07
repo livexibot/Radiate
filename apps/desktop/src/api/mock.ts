@@ -138,6 +138,7 @@ class MockBackend {
   customList: CustomChannel[] = [];
   recording = new Map<string, ActiveRecording>();
   savedRecordings: RecordingFile[] = [];
+  mpvSession: string | null = null;
   private readonly epoch = Date.now();
 
   readonly mode: string | null;
@@ -888,11 +889,25 @@ class MockBackend {
       case "mpv_available":
         return true;
       case "mpv_open": {
+        // one mpv window: the next channel replaces the stream it plays
+        if (this.mpvSession) this.closeSession(this.mpvSession);
         const { session } = this.openSession(a.target as PlayTarget);
+        this.mpvSession = session.id;
         return { sessionId: session.id };
       }
+      case "mpv_info":
+        return undefined;
+      case "mpv_stop": {
+        const sid = this.mpvSession;
+        if (sid) {
+          this.closeSession(sid);
+          this.mpvSession = null;
+          this.emit("mpv-closed", { sessionId: sid });
+        }
+        return undefined;
+      }
       case "app_info":
-        return { version: "0.7.0", dataDir: "~/.local/share/radiate" };
+        return { version: "0.8.0", dataDir: "~/.local/share/radiate" };
       case "opentv_find":
         return this.mode === "empty" || this.mode === "opentv" || a?.path
           ? {

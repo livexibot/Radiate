@@ -206,6 +206,30 @@ page.
   every channel to mpv through the relay; Radiate also finds the mpv that
   open-tv installs.
 
+## Decisions (7 November 2026, 0.8.0)
+
+- The owner asked for open-tv's player, a little more modern, and chose mpv
+  as the default for channels. Channels open in mpv unless Settings ›
+  Playback › mpv turns it off; Play here (or R for a reactor) switches that visit
+  to Radiate's own player, and Reactors and Multiview always use it.
+  Catch-up and movies stay in Radiate's player.
+- One mpv window per app, driven over its JSON IPC (`--input-ipc-server`,
+  a named pipe on Windows) and started with `--idle`, so zapping is a
+  `loadfile` in the same window. The old relay session is closed before
+  the next one opens: a one-connection account can zap in mpv.
+- Radiate's look comes from options only: the built-in OSC as a bottom bar
+  in Radiate's colours (`--script-opts`), a quieter OSD, and Radiate's own
+  Lua script (`src-tauri/src/mpv/radiate.lua`, written to the data folder at
+  start). The script draws the channel banner, binds Up / Down / Page Up /
+  Page Down / digits / Backspace on live TV, Tab and C, and sends keys back
+  as `script-message radiate …`, which Radiate's UI acts on (the same
+  zapping rules as its own player). A user's mpv.conf still applies, and
+  "More options" adds mpv options (only `--` options are passed).
+- Windows: the installer carries mpv (shinchiro's build, pinned by SHA-256
+  in `scripts/fetch-mpv.sh`) as `radiate-mpv.exe`. An mpv on PATH, or
+  open-tv's, is preferred. macOS and Linux use the system's mpv; without
+  one, channels play in Radiate.
+
 ## Layout
 
 ```

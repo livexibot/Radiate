@@ -1,0 +1,15 @@
+On Windows, Radiate installs a copy of mpv next to itself, as a separate
+program (radiate-mpv). Radiate starts it to play channels, the way open-tv
+does. Radiate itself is MIT licensed; mpv is not part of it. When mpv is
+already installed on the computer, Radiate uses that one instead.
+
+mpv is free software under the GNU General Public License, version 2 or
+later. This build includes libraries under the GPL version 3 (for example
+FFmpeg with GPL components), so as distributed it is under the GNU General
+Public License version 3 (see GPL-3.0.txt next to this file).
+
+mpv source code: https://github.com/mpv-player/mpv (commit 01e2533f31)
+This build: shinchiro's mpv-winbuild-cmake, 2026-10-18
+  https://github.com/shinchiro/mpv-winbuild-cmake
+  https://sourceforge.net/projects/mpv-player-windows/files/64bit/
+The build scripts list every library it includes and where its source is.

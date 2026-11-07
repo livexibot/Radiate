@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { api, errorMessage, type PlayTarget, type SessionInfo } from "../api";
+import { api, errorMessage, type Channel, type PlayTarget, type Programme, type SessionInfo } from "../api";
+import { Logo } from "../components/Logo";
+import { Progress } from "../components/Progress";
+import { clock, progressOf, timeRange } from "../lib/time";
 import { Icon } from "../components/Icon";
 import { useApp } from "../state/app";
 import type { LimitInfo } from "./useStream";
@@ -173,16 +176,74 @@ export function UnsupportedCard({
   );
 }
 
-export function MpvCard({ onStop }: { onStop: () => void }) {
+export function MpvCard({
+  channel,
+  now,
+  next,
+  at,
+  onHere,
+  onStop,
+}: {
+  channel?: Channel | null;
+  now?: Programme | null;
+  next?: Programme | null;
+  at?: number;
+  onHere?: () => void;
+  onStop: () => void;
+}) {
+  const t = at ?? Date.now();
   return (
-    <div className="state-card" role="status">
-      <span className="state-ico good">
-        <Icon name="external" />
+    <div className="state-card mpv-card" role="status">
+      <span className="mpv-badge">
+        <Icon name="external" /> mpv
       </span>
-      <b>Playing in mpv</b>
+      {channel ? (
+        <div className="mpv-now">
+          <Logo name={channel.name} src={channel.logo} />
+          <div className="mpv-now-main">
+            <span className="mpv-ch">
+              {channel.number ? <b className="num">{channel.number}</b> : null} {channel.name}
+            </span>
+            <b className="mpv-title">{now?.title ?? channel.name}</b>
+            {now ? (
+              <span className="mpv-time">
+                <span className="num">{timeRange(now.start, now.stop)}</span>
+                <Progress value={progressOf(now.start, now.stop, t)} />
+              </span>
+            ) : null}
+            {next ? (
+              <span className="mpv-next mute">
+                <b>Next</b> <span className="num">{clock(next.start)}</span> {next.title}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <b>Playing in mpv</b>
+      )}
+      <div className="mpv-keys mute" aria-label="Keys in mpv">
+        <span>
+          <kbd>↑</kbd>
+          <kbd>↓</kbd> Channel
+        </span>
+        <span>
+          <kbd>0–9</kbd> Number
+        </span>
+        <span>
+          <kbd>Tab</kbd> Info
+        </span>
+        <span>
+          <kbd>C</kbd> Record
+        </span>
+      </div>
       <div className="state-actions">
+        {onHere ? (
+          <button type="button" className="btn" onClick={onHere}>
+            <Icon name="play" /> Play here
+          </button>
+        ) : null}
         <button type="button" className="btn" onClick={onStop}>
-          Stop
+          <Icon name="stop" /> Stop
         </button>
       </div>
     </div>

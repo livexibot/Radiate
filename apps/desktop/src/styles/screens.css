@@ -558,3 +558,4 @@
 .more-btn { justify-self: start; }
 .grow-set > .icon { color: var(--c-text-3); flex: none; }
 .set-row:has(.set-path) > span:first-child { flex: none; }
+.set-wide { flex: 0 1 22rem; min-width: 0; }

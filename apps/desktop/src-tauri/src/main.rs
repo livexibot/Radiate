@@ -4,6 +4,7 @@
 mod background;
 mod commands;
 mod error;
+mod mpv;
 mod recording;
 mod secrets;
 mod state;
@@ -11,7 +12,6 @@ mod tools;
 mod updater;
 mod youtube;
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use radiate_core::Core;
@@ -46,7 +46,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         core,
         hub,
         data_dir,
-        mpv: Mutex::new(HashMap::new()),
+        mpv: Mutex::new(None),
         ffmpeg,
         recordings: Default::default(),
     });
@@ -136,7 +136,9 @@ fn main() {
             commands::settings_export,
             commands::settings_import,
             commands::mpv_available,
-            commands::mpv_open,
+            mpv::mpv_open,
+            mpv::mpv_info,
+            mpv::mpv_stop,
             commands::app_info,
             commands::opentv_find,
             commands::opentv_import,

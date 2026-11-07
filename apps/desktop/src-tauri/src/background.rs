@@ -35,7 +35,7 @@ pub fn forward_stream_events(app: AppHandle, hub: StreamHub) {
                 StreamEvent::Closed { session_id } => {
                     let _ = app.emit("stream-closed", &ev);
                     if let Some(state) = app.try_state::<AppState>() {
-                        state.kill_mpv(session_id);
+                        state.mpv_stream_ended(session_id);
                         state.emit_connections(&app);
                     }
                 }

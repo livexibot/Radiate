@@ -58,7 +58,13 @@ AppImage, `.deb` or `.rpm` for Linux. Radiate updates itself after that.
   network. Home keeps the channels you watched last.
 - **Zapping like a TV.** Up and down to change channel, type a number,
   Back twice for the previous channel, Enter for the channel list. F1
-  shows every shortcut. Prefer mpv? Turn on Play in mpv.
+  shows every shortcut.
+- **Channels open in mpv,** like open-tv: one window with a modern look, a
+  banner with the channel and what's on, and Up / Down, numbers and
+  Backspace to change channel right there, on the same connection. Play
+  here moves it into Radiate's own player (Reactors and Multiview use that
+  one). The Windows installer brings mpv along; elsewhere Radiate uses the
+  mpv you have.
 - **Movies and series** from Xtream sources in one Library, grouped into
   seasons, with progress, resume and Continue watching.
 - **Multiview.** Up to four channels at once, one big and three small or a
@@ -88,7 +94,8 @@ connection limit is kept. Formats the built-in player can't decode (MKV
 files, AC-3 or MP2 sound, HEVC or MPEG-2 pictures) are converted on the fly
 by a copy of [FFmpeg](https://ffmpeg.org) that Radiate installs next to
 itself (GPLv3, see [its notice](apps/desktop/src-tauri/licenses/FFMPEG.txt)),
-on the same connection, so they play inside the app.
+on the same connection, so they play inside the app. On Windows it also
+installs [mpv](https://mpv.io) (GPL, see [its notice](apps/desktop/src-tauri/licenses/MPV.txt)).
 
 Recordings are written by that same relay from the stream you are already
 receiving, so recording what you watch never takes a second connection.

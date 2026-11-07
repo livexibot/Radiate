@@ -269,8 +269,14 @@ export interface Prefs {
   reminders?: Reminder[] | null;
   /** Where recordings go; empty for Videos/Radiate. */
   recordingsDir?: string | null;
-  /** Open live channels in mpv instead of the built-in player. */
+  /** Open live channels in mpv instead of the built-in player (on unless turned off). */
   playInMpv?: boolean | null;
+  /** mpv: hardware decoding (on unless turned off). */
+  mpvHwdec?: boolean | null;
+  /** mpv: gpu-next and its high-quality profile. */
+  mpvHighQuality?: boolean | null;
+  /** mpv: more options, as typed on mpv's command line. */
+  mpvArgs?: string | null;
 }
 
 export interface EpgCandidate {
@@ -309,6 +315,20 @@ export interface PlayStarted {
   title: string;
   /** The same stream converted for the built-in player (by the bundled ffmpeg), if available. */
   convertUrl?: string | null;
+}
+
+/** What mpv's banner shows. */
+export interface MpvInfo {
+  live: boolean;
+  number: string;
+  name: string;
+  title: string;
+  time: string;
+  next: string;
+  /** 0..1 through the programme, or -1. */
+  progress: number;
+  /** Seconds to show it now; 0 only updates it. */
+  show: number;
 }
 
 export interface MpvStarted {
@@ -361,6 +381,9 @@ export interface EventMap {
   "stream-closed": StreamClosed;
   "connections-changed": ConnectionUsage[];
   "recordings-changed": ActiveRecording[];
+  /** A key pressed in the mpv window that Radiate acts on (zap, number, previous, record). */
+  "mpv-command": { action: string; value: string };
+  "mpv-closed": { sessionId: string };
   "recording-saved": { path: string; bytes: number };
   "sources-changed": null;
 }
@@ -403,7 +426,9 @@ export interface Commands {
   settings_export: [{ path: string; includeSecrets: boolean }, void];
   settings_import: [{ path: string }, void];
   mpv_available: [undefined, boolean];
-  mpv_open: [{ target: PlayTarget }, MpvStarted];
+  mpv_open: [{ target: PlayTarget; info?: MpvInfo | null }, MpvStarted];
+  mpv_info: [{ info: MpvInfo }, void];
+  mpv_stop: [undefined, void];
   app_info: [undefined, AppInfo];
   opentv_find: [{ path?: string | null }, OpenTvSummary | null];
   opentv_import: [{ path?: string | null }, ImportReport];

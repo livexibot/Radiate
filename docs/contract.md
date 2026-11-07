@@ -330,7 +330,9 @@ messages back up as `{ radiate: "yt", data }`.
 | `settings_export` | `{ path, includeSecrets }` | (writes the JSON file; the UI picks `path` with the dialog plugin's `save()`) |
 | `settings_import` | `{ path }` | (the UI picks `path` with `open()`) |
 | `mpv_available` | | `boolean` |
-| `mpv_open` | `{ target: PlayTarget }` | `{ sessionId }` — mpv reads from the relay, so it counts against the limit too |
+| `mpv_open` | `{ target: PlayTarget, info?: MpvInfo }` | `{ sessionId }`: plays the target in Radiate's mpv window, starting it if needed, or in the window already open (its stream is closed first, so a channel change never takes a second connection). mpv reads from the relay, so it counts against the limit too |
+| `mpv_info` | `{ info: MpvInfo }` | sets mpv's channel banner: `{ live, number, name, title, time, next, progress (0..1, or -1), show (seconds; 0 updates it without showing it) }` |
+| `mpv_stop` | | closes the mpv window and its stream |
 | `app_info` | | `{ version, dataDir }` |
 | `youtube_resolve` | `{ url }` | `{ kind: "video" \| "channel", videoId, channelId, title }` (handles like `@name` are looked up on youtube.com) |
 | `youtube_live_now` | `{ channelId }` | `string \| null`, the video the channel is streaming live now |
@@ -356,7 +358,9 @@ camelCase), `connections-changed` (ConnectionUsage[]), `reactor-window`
 (`{ key, open: false }` when a reactor's YouTube window closes),
 `recordings-changed` (ActiveRecording[]), `recording-saved`
 (`{ path, bytes }`), `sources-changed` (a source was added or removed
-behind the UI's back, e.g. My channels).
+behind the UI's back, e.g. My channels), `mpv-command` (`{ action, value }`: a key pressed
+in the mpv window, `zap` with -1 or 1, `number`, `previous` or `record`), `mpv-closed`
+(`{ sessionId }`: the mpv window closed).
 
 ## 4. UI (apps/desktop/src)
 

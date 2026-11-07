@@ -595,12 +595,6 @@ function PlaybackSection() {
             onChange={(v) => void setPrefs({ liveFormat: v })}
           />
         </div>
-        {mpv ? (
-          <div className="set-row">
-            <span>Play in mpv</span>
-            <input type="checkbox" className="toggle" checked={!!prefs.playInMpv} onChange={(e) => void setPrefs({ playInMpv: e.target.checked })} aria-label="Play in mpv" />
-          </div>
-        ) : null}
         <div className="set-row">
           <span>Guide refresh</span>
           <select className="input select" value={prefs.epgRefreshHours} onChange={(e) => void setPrefs({ epgRefreshHours: Number(e.target.value) })} aria-label="Guide refresh interval">
@@ -612,7 +606,44 @@ function PlaybackSection() {
           </select>
         </div>
       </section>
+      {mpv ? <MpvSettings /> : null}
     </div>
+  );
+}
+
+function MpvSettings() {
+  const { prefs, setPrefs } = useApp();
+  const [extra, setExtra] = useState(prefs?.mpvArgs ?? "");
+  if (!prefs) return null;
+  const on = prefs.playInMpv !== false;
+  return (
+    <section className="set-card" data-ui="settings-card">
+      <h3>mpv</h3>
+      <div className="set-row">
+        <span>Play channels in mpv</span>
+        <input type="checkbox" className="toggle" checked={on} onChange={(e) => void setPrefs({ playInMpv: e.target.checked })} aria-label="Play channels in mpv" />
+      </div>
+      <div className="set-row">
+        <span>Hardware decoding</span>
+        <input type="checkbox" className="toggle" checked={prefs.mpvHwdec !== false} onChange={(e) => void setPrefs({ mpvHwdec: e.target.checked })} aria-label="Hardware decoding" />
+      </div>
+      <div className="set-row">
+        <span>High quality (gpu-next)</span>
+        <input type="checkbox" className="toggle" checked={!!prefs.mpvHighQuality} onChange={(e) => void setPrefs({ mpvHighQuality: e.target.checked })} aria-label="High quality" />
+      </div>
+      <div className="set-row">
+        <span>More options</span>
+        <input
+          className="input set-wide mono"
+          value={extra}
+          placeholder="--cache-secs=30"
+          spellCheck={false}
+          onChange={(e) => setExtra(e.target.value)}
+          onBlur={() => extra !== (prefs.mpvArgs ?? "") && void setPrefs({ mpvArgs: extra.trim() || null })}
+          aria-label="More mpv options"
+        />
+      </div>
+    </section>
   );
 }
 

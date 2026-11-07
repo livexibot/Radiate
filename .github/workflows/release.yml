@@ -51,10 +51,16 @@ jobs:
         include:
           - platform: windows-latest
             args: ''
+            bin: '"binaries/radiate-ffmpeg","binaries/radiate-mpv"'
+            licenses: ',"licenses/MPV.txt":"licenses/MPV.txt"'
           - platform: macos-latest
             args: '--target universal-apple-darwin'
+            bin: '"binaries/radiate-ffmpeg"'
+            licenses: ''
           - platform: ubuntu-22.04
             args: ''
+            bin: '"binaries/radiate-ffmpeg"'
+            licenses: ''
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -80,6 +86,10 @@ jobs:
       - name: Fetch the ffmpeg the app installs alongside
         shell: bash
         run: scripts/fetch-ffmpeg.sh ${{ startsWith(matrix.platform, 'windows') && 'windows' || startsWith(matrix.platform, 'macos') && 'macos' || 'linux' }}
+      - name: Fetch the mpv the app installs alongside (Windows)
+        if: startsWith(matrix.platform, 'windows')
+        shell: bash
+        run: scripts/fetch-mpv.sh windows
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -87,7 +97,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
-          args: ${{ matrix.args }} --config '{"bundle":{"externalBin":["binaries/radiate-ffmpeg"],"resources":{"licenses/FFMPEG.txt":"licenses/FFMPEG.txt","licenses/GPL-3.0.txt":"licenses/GPL-3.0.txt"}}}'
+          args: ${{ matrix.args }} --config '{"bundle":{"externalBin":[${{ matrix.bin }}],"resources":{"licenses/FFMPEG.txt":"licenses/FFMPEG.txt","licenses/GPL-3.0.txt":"licenses/GPL-3.0.txt"${{ matrix.licenses }}}}}'
           tagName: ${{ inputs.tag || github.ref_name }}
           releaseName: Radiate v__VERSION__
           releaseBody: See the changelog for what's new.

@@ -77,8 +77,10 @@ export function Player({ route }: { route: PlayerRoute }) {
   const tick = useNow(1_000);
 
   const [mpvSession, setMpvSession] = useState<string | null>(null);
-  // "Play in mpv": the built-in player stays out of the way and mpv gets the stream.
-  const mpvMode = !!prefs?.playInMpv && mpv && target.type !== "catchup";
+  // Channels play in mpv (like open-tv) unless that's turned off, or "Play here" was chosen
+  // for this visit (reactors and multiview use Radiate's own player).
+  const [here, setHere] = useState(false);
+  const mpvMode = !!prefs && prefs.playInMpv !== false && mpv && isChannel && !here;
   const { state, retry, tryAnyway, fail } = useStream(mpvSession || mpvMode ? null : target);
   const recordings = useRecordings();
   const sessionId = mpvSession ?? (state.status === "ready" ? state.stream.sessionId : null);
@@ -153,25 +155,44 @@ export function Player({ route }: { route: PlayerRoute }) {
     appliedPrefFor.current = null;
   }, [tkey]);
 
-  // Play in mpv: open each target there as it comes.
+  // Play in mpv: each channel in the same mpv window, as it comes.
+  const mpvClosing = useRef(false);
   useEffect(() => {
     if (!mpvMode) return;
     let alive = true;
-    let opened: string | null = null;
     api.mpvOpen(target).then(
       (r) => {
-        opened = r.sessionId;
         if (alive) setMpvSession(r.sessionId);
-        else void api.playStop(r.sessionId);
+        // left the player while mpv was starting
+        else if (mpvClosing.current) void api.mpvStop().catch(() => undefined);
       },
       (e) => alive && toast(errorMessage(e), "bad"),
     );
     return () => {
       alive = false;
-      if (opened) void api.playStop(opened);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mpvMode, tkey]);
+  // Leaving the player, or playing here instead: close the mpv window.
+  useEffect(() => {
+    if (!mpvMode) return;
+    mpvClosing.current = false;
+    return () => {
+      mpvClosing.current = true;
+      void api.mpvStop().catch(() => undefined);
+    };
+  }, [mpvMode]);
+  // Play here instead: mpv's stream closes first, so an account with one connection has room.
+  const playHere = useCallback(() => {
+    mpvClosing.current = true;
+    void api
+      .mpvStop()
+      .catch(() => undefined)
+      .then(() => {
+        setMpvSession(null);
+        setHere(true);
+      });
+  }, []);
 
   // channel info, now/next, last/previous channel prefs
   useEffect(() => {
@@ -388,6 +409,58 @@ export function Player({ route }: { route: PlayerRoute }) {
   }, [nn?.now, channel?.catchupDays, navigate, target.id, toast]);
   const goLive = useCallback(() => navigate({ name: "player", target: { type: "channel", id: target.id } }, { replace: true }), [navigate, target.id]);
 
+  // Keys pressed in the mpv window come back here.
+  const mpvKeys = useRef({ zapBy, previousChannel, toggleRecord, number: (n: number) => void n });
+  mpvKeys.current = {
+    zapBy,
+    previousChannel,
+    toggleRecord,
+    number: (n: number) =>
+      void api.channelByNumber(n).then(
+        (c) => (c ? switchTo(c, { groupId: c.groupId, favoritesOnly: false }) : toast(`No channel ${n}`)),
+        () => toast(`No channel ${n}`),
+      ),
+  };
+  useEffect(() => {
+    if (!mpvMode) return;
+    const offKey = api.on("mpv-command", ({ action, value }) => {
+      const k = mpvKeys.current;
+      if (action === "zap") void k.zapBy(Number(value) < 0 ? -1 : 1);
+      else if (action === "number" && Number(value) > 0) k.number(Number(value));
+      else if (action === "previous") k.previousChannel();
+      else if (action === "record") void k.toggleRecord();
+    });
+    const offClosed = api.on("mpv-closed", () => {
+      if (!mpvClosing.current) leave();
+    });
+    return () => {
+      offKey();
+      offClosed();
+    };
+  }, [mpvMode, leave]);
+
+  // mpv's banner: the channel and what's on, shown when a channel starts.
+  const bannerFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!mpvMode || !mpvSession || !channel || channel.id !== target.id) return;
+    const p = nn?.now?.channelId === target.id ? nn.now : null;
+    const n = nn?.next?.channelId === target.id ? nn.next : null;
+    const first = bannerFor.current !== tkey;
+    bannerFor.current = tkey;
+    void api
+      .mpvInfo({
+        live: true,
+        number: channel.number ? String(channel.number) : "",
+        name: channel.name,
+        title: p?.title ?? "",
+        time: p ? timeRange(p.start, p.stop) : "",
+        next: n ? `${clock(n.start)}  ${n.title}` : "",
+        progress: p ? progressOf(p.start, p.stop, Date.now()) : -1,
+        show: first ? 5 : 0,
+      })
+      .catch(() => undefined);
+  }, [mpvMode, mpvSession, channel, nn, target.id, tkey, now]);
+
   const openContext = useCallback(() => {
     if (!channel) return;
     const r = rootRef.current?.getBoundingClientRect();
@@ -526,6 +599,7 @@ export function Player({ route }: { route: PlayerRoute }) {
           navigate({ name: "guide" });
           return;
         case "r":
+          if (mpvMode) playHere();
           if (isChannel) toggleReactor();
           return;
         case "c":
@@ -596,6 +670,8 @@ export function Player({ route }: { route: PlayerRoute }) {
   const next = nn?.next ?? null;
   const title = isChannel ? (prog?.title ?? channel?.name ?? "") : isCatchup && route.title ? route.title : state.status === "ready" ? state.stream.title : (route.title ?? "");
   const showChrome = chrome || keepChrome;
+  // mpv has its own pause, volume, tracks and full screen
+  const inMpv = !!mpvSession || mpvMode;
   const [zapVisible, setZapVisible] = useState(false);
   useEffect(() => {
     if (!zapFlash) return;
@@ -613,8 +689,14 @@ export function Player({ route }: { route: PlayerRoute }) {
   if (mpvSession || mpvMode) {
     card = (
       <MpvCard
+        channel={isChannel ? channel : null}
+        now={nn?.now?.channelId === target.id ? nn.now : null}
+        next={nn?.next?.channelId === target.id ? nn.next : null}
+        at={now}
+        onHere={mpvMode ? playHere : undefined}
         onStop={() => {
-          if (mpvSession) void api.playStop(mpvSession);
+          mpvClosing.current = true;
+          void api.mpvStop().catch(() => undefined);
           setMpvSession(null);
           if (mpvMode) leave();
         }}
@@ -863,23 +945,27 @@ export function Player({ route }: { route: PlayerRoute }) {
         )}
         <div className="pctrls">
           <div className="grp">
-            <button
-              type="button"
-              className="cb on"
-              aria-label={paused ? "Play" : "Pause"}
-              onClick={() => {
-                const v = control.current?.video;
-                if (v) void (v.paused ? v.play() : v.pause());
-              }}
-            >
-              <Icon name={paused ? "play" : "pause"} />
-            </button>
-            <div className="vol">
-              <button type="button" className="cb" aria-label={muted ? "Unmute" : "Mute"} onClick={() => void setPrefs({ muted: !muted })}>
-                <Icon name={muted || volume === 0 ? "mute" : "volume"} />
-              </button>
-              <input type="range" min={0} max={1} step={0.05} value={muted ? 0 : volume} aria-label="Volume" onChange={(e) => setVolume(Number(e.target.value))} />
-            </div>
+            {inMpv ? null : (
+              <>
+                <button
+                  type="button"
+                  className="cb on"
+                  aria-label={paused ? "Play" : "Pause"}
+                  onClick={() => {
+                    const v = control.current?.video;
+                    if (v) void (v.paused ? v.play() : v.pause());
+                  }}
+                >
+                  <Icon name={paused ? "play" : "pause"} />
+                </button>
+                <div className="vol">
+                  <button type="button" className="cb" aria-label={muted ? "Unmute" : "Mute"} onClick={() => void setPrefs({ muted: !muted })}>
+                    <Icon name={muted || volume === 0 ? "mute" : "volume"} />
+                  </button>
+                  <input type="range" min={0} max={1} step={0.05} value={muted ? 0 : volume} aria-label="Volume" onChange={(e) => setVolume(Number(e.target.value))} />
+                </div>
+              </>
+            )}
             {isChannel ? (
               <button type="button" className="cb" onClick={previousChannel} aria-label="Previous channel">
                 <Icon name="last" /> Last
@@ -887,13 +973,17 @@ export function Player({ route }: { route: PlayerRoute }) {
             ) : null}
           </div>
           <div className="grp">
-            <button type="button" className={menu === "audio" ? "cb on" : "cb"} onClick={() => setMenu(menu === "audio" ? null : "audio")} aria-haspopup="menu" aria-expanded={menu === "audio"}>
-              <Icon name="audio" /> Audio
-            </button>
-            <button type="button" className={menu === "subtitles" ? "cb on" : "cb"} onClick={() => setMenu(menu === "subtitles" ? null : "subtitles")} aria-haspopup="menu" aria-expanded={menu === "subtitles"}>
-              <Icon name="cc" /> Subtitles
-            </button>
-            {sessionId && !mpvSession ? (
+            {inMpv ? null : (
+              <>
+                <button type="button" className={menu === "audio" ? "cb on" : "cb"} onClick={() => setMenu(menu === "audio" ? null : "audio")} aria-haspopup="menu" aria-expanded={menu === "audio"}>
+                  <Icon name="audio" /> Audio
+                </button>
+                <button type="button" className={menu === "subtitles" ? "cb on" : "cb"} onClick={() => setMenu(menu === "subtitles" ? null : "subtitles")} aria-haspopup="menu" aria-expanded={menu === "subtitles"}>
+                  <Icon name="cc" /> Subtitles
+                </button>
+              </>
+            )}
+            {sessionId ? (
               <button type="button" className={rec ? "cb rec on" : "cb rec"} onClick={() => void toggleRecord()} aria-pressed={!!rec} title="Record (C)">
                 <Icon name={rec ? "stop" : "rec"} /> {rec ? "Stop" : "Record"}
               </button>
@@ -924,12 +1014,16 @@ export function Player({ route }: { route: PlayerRoute }) {
                 </button>
               </>
             ) : null}
-            <button type="button" className={statsOn ? "cb on" : "cb"} aria-label="Stream stats" aria-pressed={statsOn} onClick={() => setStatsOn((s) => !s)}>
-              <Icon name="info" />
-            </button>
-            <button type="button" className="cb" aria-label="Full screen" onClick={() => void toggleFullscreen()}>
-              <Icon name="expand" />
-            </button>
+            {inMpv ? null : (
+              <>
+                <button type="button" className={statsOn ? "cb on" : "cb"} aria-label="Stream stats" aria-pressed={statsOn} onClick={() => setStatsOn((s) => !s)}>
+                  <Icon name="info" />
+                </button>
+                <button type="button" className="cb" aria-label="Full screen" onClick={() => void toggleFullscreen()}>
+                  <Icon name="expand" />
+                </button>
+              </>
+            )}
           </div>
         </div>
         {menu === "reactor" ? (
