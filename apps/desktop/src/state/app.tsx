@@ -32,6 +32,8 @@ export interface Toast {
   id: number;
   text: string;
   tone: "info" | "good" | "bad";
+  /** A button on the toast (a reminder's Watch); the toast then stays longer. */
+  action?: { label: string; run: () => void };
 }
 
 interface AppState {
@@ -49,7 +51,7 @@ interface AppState {
   version: number;
   bump: () => void;
   toasts: Toast[];
-  toast: (text: string, tone?: Toast["tone"]) => void;
+  toast: (text: string, tone?: Toast["tone"], action?: Toast["action"]) => void;
   dismissToast: (id: number) => void;
   sourceName: (id: string) => string;
 }
@@ -98,10 +100,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const toastSeq = useRef(1);
   const booted = useRef(false);
 
-  const toast = useCallback((text: string, tone: Toast["tone"] = "info") => {
+  const toast = useCallback((text: string, tone: Toast["tone"] = "info", action?: Toast["action"]) => {
     const id = toastSeq.current++;
-    setToasts((t) => [...t.filter((x) => x.text !== text), { id, text, tone }].slice(-4));
-    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
+    setToasts((t) => [...t.filter((x) => x.text !== text), { id, text, tone, action }].slice(-4));
+    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), action ? 30_000 : 4200);
   }, []);
   const dismissToast = useCallback((id: number) => setToasts((t) => t.filter((x) => x.id !== id)), []);
 
@@ -165,6 +167,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const offs = [
       api.on("connections-changed", setUsage),
+      api.on("sources-changed", () => {
+        void api.sourcesList().then(setSources, () => undefined);
+        bump();
+      }),
       api.on("source-updated", (s) => {
         setSources((list) => (list ? list.map((x) => (x.id === s.id ? s : x)) : list));
         if (s.status === "idle" && !s.error) bump();

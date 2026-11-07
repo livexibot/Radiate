@@ -93,3 +93,12 @@
 .mv-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 4.5rem; display: flex; align-items: center; justify-content: center; gap: var(--sp-2); padding: 0 var(--sp-4); }
 .mv-sep { width: 1px; height: 1.8rem; background: var(--c-line-strong); margin: 0 var(--sp-2); }
 .mv-note { position: absolute; left: 50%; bottom: 5.25rem; transform: translateX(-50%); background: var(--c-glass); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md); font-weight: var(--fw-semi); font-size: var(--fs-sm); z-index: 6; box-shadow: var(--e-2), inset 0 0 0 1px var(--c-line); max-width: 90%; text-align: center; backdrop-filter: blur(12px); }
+
+/* recording */
+.rec-badge { display: inline-flex; align-items: center; gap: var(--sp-2); height: 2rem; padding: 0 var(--sp-3); border-radius: 999px; border: 0; background: rgba(0, 0, 0, 0.55); color: #fff; font-weight: var(--fw-semi); font-size: var(--fs-xs); letter-spacing: 0.04em; cursor: pointer; margin-left: auto; margin-right: var(--sp-3); }
+.rec-dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--c-live); animation: rec-blink 1.4s ease-in-out infinite; }
+.cb.rec.on { color: #fff; background: var(--c-live); }
+.cb.rec .icon { color: var(--c-live); }
+.cb.rec.on .icon { color: #fff; }
+@keyframes rec-blink { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }

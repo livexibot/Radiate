@@ -28,6 +28,9 @@ import { reactorSession, useReactors } from "../reactor/useReactors";
 import { useApp, type Route, type ZapContext } from "../state/app";
 import { useChannelActions } from "../state/channelActions";
 import { useNow } from "../state/hooks";
+import { elapsed, recordingFor, useRecordings } from "../state/recordings";
+import { pushRecent } from "../lib/reminders";
+import { errorMessage } from "../api";
 
 type PlayerRoute = Extract<Route, { name: "player" }>;
 
@@ -66,13 +69,20 @@ function focusKind(active: Element | null, root: HTMLElement | null): FocusKind 
 }
 
 export function Player({ route }: { route: PlayerRoute }) {
-  const { navigate, back, prefs, setPrefs, toast, version } = useApp();
+  const { navigate, back, prefs, setPrefs, toast, version, mpv } = useApp();
   const target = route.target;
   const isChannel = target.type === "channel";
+  const isCatchup = target.type === "catchup";
   const now = useNow(15_000);
+  const tick = useNow(1_000);
 
   const [mpvSession, setMpvSession] = useState<string | null>(null);
-  const { state, retry, tryAnyway, fail } = useStream(mpvSession ? null : target);
+  // "Play in mpv": the built-in player stays out of the way and mpv gets the stream.
+  const mpvMode = !!prefs?.playInMpv && mpv && target.type !== "catchup";
+  const { state, retry, tryAnyway, fail } = useStream(mpvSession || mpvMode ? null : target);
+  const recordings = useRecordings();
+  const sessionId = mpvSession ?? (state.status === "ready" ? state.stream.sessionId : null);
+  const rec = recordingFor(recordings, sessionId);
   const [fatal, setFatal] = useState<FatalInfo | null>(null);
   const [channel, setChannel] = useState<Channel | null>(null);
   const [nn, setNn] = useState<NowNext | null>(null);
@@ -143,9 +153,29 @@ export function Player({ route }: { route: PlayerRoute }) {
     appliedPrefFor.current = null;
   }, [tkey]);
 
+  // Play in mpv: open each target there as it comes.
+  useEffect(() => {
+    if (!mpvMode) return;
+    let alive = true;
+    let opened: string | null = null;
+    api.mpvOpen(target).then(
+      (r) => {
+        opened = r.sessionId;
+        if (alive) setMpvSession(r.sessionId);
+        else void api.playStop(r.sessionId);
+      },
+      (e) => alive && toast(errorMessage(e), "bad"),
+    );
+    return () => {
+      alive = false;
+      if (opened) void api.playStop(opened);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mpvMode, tkey]);
+
   // channel info, now/next, last/previous channel prefs
   useEffect(() => {
-    if (!isChannel) {
+    if (!isChannel && !isCatchup) {
       setChannel(null);
       setNn(null);
       return;
@@ -158,7 +188,7 @@ export function Player({ route }: { route: PlayerRoute }) {
     return () => {
       alive = false;
     };
-  }, [isChannel, target.id, version]);
+  }, [isChannel, isCatchup, target.id, version]);
 
   useEffect(() => {
     if (!isChannel) return;
@@ -178,7 +208,11 @@ export function Player({ route }: { route: PlayerRoute }) {
     if (!isChannel) return;
     const p = prefsRef.current;
     if (!p || p.lastChannelId === target.id) return;
-    void setPrefs({ lastChannelId: target.id, previousChannelId: nextPrevious(p.lastChannelId, target.id, p.previousChannelId) });
+    void setPrefs({
+      lastChannelId: target.id,
+      previousChannelId: nextPrevious(p.lastChannelId, target.id, p.previousChannelId),
+      recentChannels: pushRecent(p.recentChannels, target.id),
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isChannel, target.id]);
 
@@ -222,7 +256,7 @@ export function Player({ route }: { route: PlayerRoute }) {
   // itself, so a position never lands on the wrong item while one episode hands over to the next.
   const saveProgress = useRef<() => void>(() => undefined);
   useEffect(() => {
-    if (isChannel) return;
+    if (isChannel || isCatchup) return;
     const id = target.id;
     const save = () => {
       const c = control.current;
@@ -237,7 +271,7 @@ export function Player({ route }: { route: PlayerRoute }) {
       save();
       saveProgress.current = () => undefined;
     };
-  }, [isChannel, target.id]);
+  }, [isChannel, isCatchup, target.id]);
 
   // next episode
   const nextUp = useNextEpisode(target);
@@ -326,6 +360,34 @@ export function Player({ route }: { route: PlayerRoute }) {
     setListOpen(true);
   }, [zap, target.id]);
 
+  // Recording what plays, through the relay (no second connection).
+  const toggleRecord = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      if (rec) {
+        await api.recordStop(sessionId);
+      } else {
+        const what = isChannel ? [channel?.name, nn?.now?.title].filter(Boolean).join(" ") : (route.title ?? (state.status === "ready" ? state.stream.title : "Recording"));
+        await api.recordStart(sessionId, what || "Recording");
+        toast("Recording", "good");
+      }
+    } catch (e) {
+      toast(errorMessage(e), "bad");
+    }
+  }, [sessionId, rec, isChannel, channel?.name, nn?.now?.title, route.title, state, toast]);
+
+  // The programme on now, from its start (catch-up), when the provider keeps it.
+  const canFromStart = isChannel && !!channel?.catchupDays && !!nn?.now && nn.now.start < Date.now();
+  const fromStart = useCallback(() => {
+    const p = nn?.now;
+    if (!p || !channel?.catchupDays) {
+      toast("This channel doesn't keep past programmes");
+      return;
+    }
+    navigate({ name: "player", target: { type: "catchup", id: target.id, start: p.start, stop: p.stop }, title: p.title }, { replace: true });
+  }, [nn?.now, channel?.catchupDays, navigate, target.id, toast]);
+  const goLive = useCallback(() => navigate({ name: "player", target: { type: "channel", id: target.id } }, { replace: true }), [navigate, target.id]);
+
   const openContext = useCallback(() => {
     if (!channel) return;
     const r = rootRef.current?.getBoundingClientRect();
@@ -333,11 +395,13 @@ export function Player({ route }: { route: PlayerRoute }) {
       x: (r?.width ?? 800) / 2 - 100,
       y: (r?.height ?? 600) / 2 - 60,
       items: [
+        ...(sessionId ? [{ label: rec ? "Stop recording" : "Record", icon: rec ? ("stop" as const) : ("rec" as const), onSelect: () => void toggleRecord() }] : []),
+        ...(canFromStart ? [{ label: "Watch from the start", icon: "restart" as const, onSelect: fromStart }] : []),
         { label: channel.favorite ? "Remove from favorites" : "Add to favorites", icon: "star", onSelect: () => void setFavorite(channel, !channel.favorite) },
         { label: "Hide channel", icon: "eyeOff", onSelect: () => void hide(channel).then(() => zapBy(1)) },
       ],
     });
-  }, [channel, setFavorite, hide, zapBy]);
+  }, [channel, setFavorite, hide, zapBy, sessionId, rec, toggleRecord, canFromStart, fromStart]);
 
   // keyboard
   useEffect(() => {
@@ -464,6 +528,13 @@ export function Player({ route }: { route: PlayerRoute }) {
         case "r":
           if (isChannel) toggleReactor();
           return;
+        case "c":
+          void toggleRecord();
+          return;
+        case "t":
+          if (isChannel) fromStart();
+          else if (isCatchup) goLive();
+          return;
         case "l":
           navigate({ name: "live" });
           return;
@@ -539,12 +610,13 @@ export function Player({ route }: { route: PlayerRoute }) {
     setFatal(null);
     void retry();
   };
-  if (mpvSession) {
+  if (mpvSession || mpvMode) {
     card = (
       <MpvCard
         onStop={() => {
-          void api.playStop(mpvSession);
+          if (mpvSession) void api.playStop(mpvSession);
           setMpvSession(null);
+          if (mpvMode) leave();
         }}
       />
     );
@@ -589,6 +661,8 @@ export function Player({ route }: { route: PlayerRoute }) {
           x: e.clientX,
           y: e.clientY,
           items: [
+            ...(sessionId ? [{ label: rec ? "Stop recording" : "Record", icon: rec ? ("stop" as const) : ("rec" as const), onSelect: () => void toggleRecord() }] : []),
+            ...(canFromStart ? [{ label: "Watch from the start", icon: "restart" as const, onSelect: fromStart }] : []),
             { label: channel.favorite ? "Remove from favorites" : "Add to favorites", icon: "star", onSelect: () => void setFavorite(channel, !channel.favorite) },
             { label: "Hide channel", icon: "eyeOff", onSelect: () => void hide(channel).then(() => zapBy(1)) },
           ],
@@ -727,12 +801,18 @@ export function Player({ route }: { route: PlayerRoute }) {
             </div>
           )}
         </div>
+        {rec ? (
+          <button type="button" className="rec-badge num" onClick={() => void toggleRecord()} title="Stop recording (C)">
+            <span className="rec-dot" /> REC {elapsed(rec.startedAt, tick)}
+          </button>
+        ) : null}
         {statsOn ? <StatsPill stats={stats} bitrateKbps={state.status === "ready" ? state.bitrateKbps : null} stalled={state.status === "ready" && state.stalled} /> : null}
       </div>
 
       <div className="pbot">
         <div>
           {isChannel && prog ? <span className={behindLive ? "live-tag behind" : "live-tag"}>Live</span> : null}
+          {isCatchup ? <span className="live-tag behind">{channel ? `${channel.name} · ` : ""}From the start</span> : null}
           <h1 className="ptitle">{title}</h1>
           <div className="psub">
             {isChannel && prog ? <span className="num">{timeRange(prog.start, prog.stop)}</span> : null}
@@ -813,6 +893,21 @@ export function Player({ route }: { route: PlayerRoute }) {
             <button type="button" className={menu === "subtitles" ? "cb on" : "cb"} onClick={() => setMenu(menu === "subtitles" ? null : "subtitles")} aria-haspopup="menu" aria-expanded={menu === "subtitles"}>
               <Icon name="cc" /> Subtitles
             </button>
+            {sessionId && !mpvSession ? (
+              <button type="button" className={rec ? "cb rec on" : "cb rec"} onClick={() => void toggleRecord()} aria-pressed={!!rec} title="Record (C)">
+                <Icon name={rec ? "stop" : "rec"} /> {rec ? "Stop" : "Record"}
+              </button>
+            ) : null}
+            {canFromStart ? (
+              <button type="button" className="cb" onClick={fromStart} title="Watch from the start (T)">
+                <Icon name="restart" /> From start
+              </button>
+            ) : null}
+            {isCatchup ? (
+              <button type="button" className="cb" onClick={goLive} title="Back to live (T)">
+                <Icon name="live" /> Live
+              </button>
+            ) : null}
             {isChannel ? (
               <>
                 <button type="button" className={menu === "reactor" || shown.length ? "cb on" : "cb"} onClick={() => setMenu(menu === "reactor" ? null : "reactor")} aria-haspopup="menu" aria-expanded={menu === "reactor"}>

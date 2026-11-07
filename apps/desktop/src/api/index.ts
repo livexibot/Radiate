@@ -5,6 +5,7 @@ import type {
   CommandName,
   CommandResult,
   ContentKind,
+  CustomChannel,
   EventMap,
   EventName,
   NewSource,
@@ -137,6 +138,18 @@ export const api = {
   mpvAvailable: () => call("mpv_available", undefined),
   mpvOpen: (target: PlayTarget) => call("mpv_open", { target }),
   appInfo: () => call("app_info", undefined),
+  opentvFind: () => call("opentv_find", undefined),
+  opentvImport: (path?: string | null) => call("opentv_import", { path: path ?? null }),
+  customChannelsGet: () => call("custom_channels_get", undefined),
+  customChannelsSet: (list: CustomChannel[]) => call("custom_channels_set", { list }),
+  recordStart: (sessionId: string, title: string) => call("record_start", { sessionId, title }),
+  recordStop: (sessionId: string) => call("record_stop", { sessionId }),
+  recordChannel: (target: PlayTarget, title?: string | null, until?: number | null) =>
+    call("record_channel", { target, title: title ?? null, until: until ?? null }),
+  recordingsActive: () => call("recordings_active", undefined),
+  recordingsList: () => call("recordings_list", undefined),
+  recordingsFolder: () => call("recordings_folder", undefined),
+  openPath: (path?: string | null) => call("open_path", { path: path ?? null }),
 };
 
 export type Api = typeof api;

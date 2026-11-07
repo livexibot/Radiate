@@ -24,11 +24,13 @@ export interface Source {
   lastRefreshed: number | null;
   status: SourceStatus;
   error: string | null;
+  /** User agent sent to this provider, when the user chose one. */
+  userAgent?: string | null;
 }
 
 export type NewSource =
-  | { kind: "m3u"; name: string; url: string; epgUrls: string[] }
-  | { kind: "xtream"; name: string; server: string; username: string; password: string; epgUrls: string[] };
+  | { kind: "m3u"; name: string; url: string; epgUrls: string[]; userAgent?: string | null }
+  | { kind: "xtream"; name: string; server: string; username: string; password: string; epgUrls: string[]; userAgent?: string | null };
 
 export interface SourcePatch {
   name?: string;
@@ -37,6 +39,8 @@ export interface SourcePatch {
   userMaxConnections?: number | null;
   /** New Xtream password; never returned. */
   password?: string;
+  /** `null` goes back to Radiate's own user agent. */
+  userAgent?: string | null;
 }
 
 export type ContentKind = "live" | "movie" | "series";
@@ -166,7 +170,64 @@ export interface SearchResults {
 export type PlayTarget =
   | { type: "channel"; id: string }
   | { type: "movie"; id: string }
-  | { type: "episode"; id: string };
+  | { type: "episode"; id: string }
+  /** A channel's programme from the provider's archive (catch-up); Unix ms. */
+  | { type: "catchup"; id: string; start: number; stop: number };
+
+/** A stream the user added by its address ("My channels"). */
+export interface CustomChannel {
+  name: string;
+  url: string;
+  group?: string | null;
+  logo?: string | null;
+  userAgent?: string | null;
+  referrer?: string | null;
+  origin?: string | null;
+}
+
+/** open-tv's library found on this computer (no passwords). */
+export interface OpenTvSummary {
+  path: string;
+  sources: { name: string; kind: "xtream" | "m3u" | "file"; detail: string; enabled: boolean }[];
+  favorites: number;
+  customChannels: number;
+}
+
+export interface ImportReport {
+  added: string[];
+  skipped: { name: string; reason: string }[];
+  favorites: number;
+  hidden: number;
+  customChannels: number;
+}
+
+export interface ActiveRecording {
+  sessionId: string;
+  title: string;
+  path: string;
+  bytes: number;
+  startedAt: number;
+  /** Recorded without the player. */
+  background: boolean;
+  until: number | null;
+}
+
+export interface RecordingFile {
+  path: string;
+  name: string;
+  bytes: number;
+  modified: number;
+}
+
+/** A programme the user wants to be told about, or recorded. */
+export interface Reminder {
+  channelId: string;
+  channelName: string;
+  title: string;
+  start: number;
+  stop: number;
+  record: boolean;
+}
 
 export type StreamKind = "hls" | "mpegts" | "mp4" | "mkv" | "unknown";
 
@@ -202,6 +263,14 @@ export interface Prefs {
   appearance?: Appearance | null;
   /** Installed theme and layout files, as read from the file and checked. */
   plugins?: unknown[] | null;
+  /** Live channels watched lately, newest first (ids). */
+  recentChannels?: string[] | null;
+  /** Programmes to remind about or record. */
+  reminders?: Reminder[] | null;
+  /** Where recordings go; empty for Videos/Radiate. */
+  recordingsDir?: string | null;
+  /** Open live channels in mpv instead of the built-in player. */
+  playInMpv?: boolean | null;
 }
 
 export interface EpgCandidate {
@@ -291,6 +360,9 @@ export interface EventMap {
   "stream-failed": StreamFailed;
   "stream-closed": StreamClosed;
   "connections-changed": ConnectionUsage[];
+  "recordings-changed": ActiveRecording[];
+  "recording-saved": { path: string; bytes: number };
+  "sources-changed": null;
 }
 
 export type EventName = keyof EventMap;
@@ -333,6 +405,17 @@ export interface Commands {
   mpv_available: [undefined, boolean];
   mpv_open: [{ target: PlayTarget }, MpvStarted];
   app_info: [undefined, AppInfo];
+  opentv_find: [undefined, OpenTvSummary | null];
+  opentv_import: [{ path?: string | null }, ImportReport];
+  custom_channels_get: [undefined, CustomChannel[]];
+  custom_channels_set: [{ list: CustomChannel[] }, Source | null];
+  record_start: [{ sessionId: string; title: string }, ActiveRecording];
+  record_stop: [{ sessionId: string }, void];
+  record_channel: [{ target: PlayTarget; title?: string | null; until?: number | null }, ActiveRecording];
+  recordings_active: [undefined, ActiveRecording[]];
+  recordings_list: [undefined, RecordingFile[]];
+  recordings_folder: [undefined, string];
+  open_path: [{ path?: string | null }, void];
 }
 
 export type CommandName = keyof Commands;

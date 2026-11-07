@@ -17,6 +17,8 @@ import { Settings } from "./screens/Settings";
 import { useAppearance } from "./plugins/host";
 import { useApp, type Route } from "./state/app";
 import { useSpatialNav } from "./state/useSpatialNav";
+import { Scheduler } from "./state/Scheduler";
+import { ShortcutHelp } from "./components/ShortcutHelp";
 
 function isTyping(el: Element | null) {
   return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
@@ -132,6 +134,8 @@ export function App() {
       {fullscreen ? null : <TopBar />}
       <main className="main-area">{screen}</main>
       <Toasts />
+      <Scheduler />
+      <ShortcutHelp />
     </div>
   );
 }

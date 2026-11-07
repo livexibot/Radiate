@@ -22,6 +22,9 @@ import {
   type ChannelDef,
 } from "./mockData";
 import type {
+  ActiveRecording,
+  CustomChannel,
+  RecordingFile,
   Channel,
   ChannelProgramme,
   ChannelQuery,
@@ -132,9 +135,14 @@ class MockBackend {
     sportsGroups: { include: [], exclude: [] },
   };
   private seq = 1;
+  customList: CustomChannel[] = [];
+  recording = new Map<string, ActiveRecording>();
+  savedRecordings: RecordingFile[] = [];
   private readonly epoch = Date.now();
 
+  readonly mode: string | null;
   constructor(mode: string | null) {
+    this.mode = mode;
     if (mode === "empty") {
       this.prefs.onboarded = false;
       return;
@@ -246,7 +254,7 @@ class MockBackend {
         epgChannelId: d.noGuide ? null : d.name.toLowerCase().replace(/[^a-z0-9]+/g, "."),
         favorite: !!d.favorite,
         hidden: false,
-        catchupDays: null,
+        catchupDays: g.name.toLowerCase().includes("sport") ? 3 : null,
         offline: !!d.offline,
         guideGroup: PROGRAMME_POOLS[pool] ? pool : "General",
       });
@@ -540,6 +548,11 @@ class MockBackend {
   }
 
   resolveTarget(t: PlayTarget): { sourceId: string; title: string; kind: StreamKind; offline: boolean; url: string } {
+    if (t.type === "catchup") {
+      const c = this.mustChannel(t.id);
+      if (!c.catchupDays) throw new ApiError("invalid", "This channel doesn't keep past programmes.");
+      return { sourceId: c.sourceId, title: c.name, kind: "hls", offline: false, url: TEST_STREAM };
+    }
     if (t.type === "channel") {
       const c = this.mustChannel(t.id);
       return { sourceId: c.sourceId, title: c.name, kind: "hls", offline: c.offline, url: c.number % 2 ? TEST_STREAM : TEST_STREAM_HD };
@@ -593,6 +606,14 @@ class MockBackend {
   closeSession(id: string) {
     const s = this.sessions.get(id);
     if (!s) return;
+    const rec = this.recording.get(id);
+    if (rec) {
+      this.recording.delete(id);
+      const path = rec.path.replace(/\.ts$/, ".mp4");
+      this.savedRecordings.unshift({ path, name: rec.title, bytes: Math.round((Date.now() - rec.startedAt) * 600), modified: Date.now() });
+      this.emit("recordings-changed", [...this.recording.values()]);
+      this.emit("recording-saved", { path, bytes: 0 });
+    }
     if (s.healthTimer) clearInterval(s.healthTimer);
     this.sessions.delete(id);
     this.emit("stream-closed", { sessionId: id });
@@ -871,7 +892,97 @@ class MockBackend {
         return { sessionId: session.id };
       }
       case "app_info":
-        return { version: "0.6.0", dataDir: "~/.local/share/radiate" };
+        return { version: "0.7.0", dataDir: "~/.local/share/radiate" };
+      case "opentv_find":
+        return this.mode === "empty" || this.mode === "opentv"
+          ? {
+              path: "C:\\Users\\you\\AppData\\Roaming\\fredol\\open-tv\\data\\db.sqlite",
+              sources: [
+                { name: "My provider", kind: "xtream", detail: "line.example.tv", enabled: true },
+                { name: "Sports list", kind: "m3u", detail: "lists.example.com", enabled: true },
+              ],
+              favorites: 12,
+              customChannels: 1,
+            }
+          : null;
+      case "opentv_import":
+        return (async () => {
+          await this.addSource({ kind: "xtream", name: "My provider", server: "http://line.example.tv", username: "demo", password: "demo", epgUrls: [] });
+          return { added: ["My provider"], skipped: [{ name: "Sports list", reason: "The provider isn't answering." }], favorites: 6, hidden: 2, customChannels: 1 };
+        })();
+      case "custom_channels_get":
+        return structuredClone(this.customList);
+      case "custom_channels_set":
+        return (async () => {
+          this.customList = structuredClone(a.list as CustomChannel[]);
+          const existing = this.sources.find((x) => x.name === "My channels");
+          if (!this.customList.length) {
+            if (existing) this.sources = this.sources.filter((x) => x !== existing);
+            this.emit("sources-changed", null);
+            return null;
+          }
+          if (existing) {
+            existing.channelCount = this.customList.length;
+            this.emit("source-updated", { ...existing });
+            return { ...existing };
+          }
+          const src = await this.addSource({ kind: "m3u", name: "My channels", url: "/data/my-channels.m3u", epgUrls: [] });
+          src.channelCount = this.customList.length;
+          return { ...src };
+        })();
+      case "record_start": {
+        const sess = this.sessions.get(a.sessionId as string);
+        if (!sess) throw new ApiError("not_found", "This stream has stopped.");
+        const rec: ActiveRecording = {
+          sessionId: sess.id,
+          title: a.title as string,
+          path: `~/Videos/Radiate/${a.title as string}.ts`,
+          bytes: 0,
+          startedAt: Date.now(),
+          background: false,
+          until: null,
+        };
+        this.recording.set(sess.id, rec);
+        this.emit("recordings-changed", [...this.recording.values()]);
+        return rec;
+      }
+      case "record_channel": {
+        const { session, resolved } = this.openSession(a.target as PlayTarget);
+        const title = (a.title as string | null) ?? resolved.title;
+        const rec: ActiveRecording = {
+          sessionId: session.id,
+          title,
+          path: `~/Videos/Radiate/${title}.ts`,
+          bytes: 0,
+          startedAt: Date.now(),
+          background: true,
+          until: (a.until as number | null) ?? null,
+        };
+        this.recording.set(session.id, rec);
+        this.emit("recordings-changed", [...this.recording.values()]);
+        return rec;
+      }
+      case "record_stop": {
+        const rec = this.recording.get(a.sessionId as string);
+        if (rec) {
+          this.recording.delete(rec.sessionId);
+          if (rec.background) this.closeSession(rec.sessionId);
+          const path = rec.path.replace(/\.ts$/, ".mp4");
+          const bytes = Math.round((Date.now() - rec.startedAt) * 600);
+          this.savedRecordings.unshift({ path, name: rec.title, bytes, modified: Date.now() });
+          this.emit("recordings-changed", [...this.recording.values()]);
+          this.emit("recording-saved", { path, bytes });
+        }
+        return undefined;
+      }
+      case "recordings_active":
+        return [...this.recording.values()];
+      case "recordings_list":
+        return structuredClone(this.savedRecordings);
+      case "recordings_folder":
+        return "~/Videos/Radiate";
+      case "open_path":
+        return undefined;
     }
   }
 }

@@ -325,6 +325,9 @@ input[type="range"] { accent-color: var(--c-accent); }
 .toast-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--c-good); flex: none; }
 .toast.bad .toast-dot { background: var(--c-live); }
 .toast.good .toast-dot { background: var(--c-accent); }
+.toast.with-action { padding-right: var(--sp-2); }
+.toast.with-action .toast-text { flex: 1; }
+.toast.with-action .icon-btn { font-size: 1.1rem; }
 
 /* context menu */
 .ctx { position: fixed; z-index: 70; min-width: 13rem; background: var(--c-surface-2); border-radius: var(--r-md); padding: var(--sp-1); box-shadow: var(--e-2), inset 0 0 0 1px var(--c-line); display: grid; animation: pop var(--t-fast) var(--ease); }

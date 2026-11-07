@@ -15,6 +15,7 @@ import { clampIndex, computeWindow } from "../lib/virtual";
 import { useAppearance } from "../plugins/host";
 import { useApp } from "../state/app";
 import { useChannelActions } from "../state/channelActions";
+import { canCatchup, useProgrammeActions } from "../state/programmeActions";
 import { mergeGroupsByName, useDebounced, useGroups, useLoad, useNow, usePagedChannels, useSportsOverrides } from "../state/hooks";
 import { EpgMatchPicker } from "./EpgMatchPicker";
 
@@ -90,6 +91,7 @@ export function Guide({ initialChip }: { initialChip?: string }) {
   const [fixing, setFixing] = useState<Channel | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const { menuFor } = useChannelActions();
+  const pa = useProgrammeActions();
 
   // epg cache: chunk start -> channel id -> programmes
   const cache = useRef(new Map<number, Map<string, Programme[]>>());
@@ -281,6 +283,8 @@ export function Guide({ initialChip }: { initialChip?: string }) {
         e.preventDefault();
         if (!selChannel) return;
         if (!selProg || isLive(selProg)) play(selChannel);
+        else if (canCatchup(selChannel, selProg, Date.now())) pa.watchFromStart(selChannel, selProg);
+        else if (selProg.start > Date.now()) pa.remind(selChannel, selProg);
         return;
     }
   };
@@ -372,6 +376,8 @@ export function Guide({ initialChip }: { initialChip?: string }) {
           if (b.isNow) cls.push("now");
           if (b.isPast) cls.push("past");
           if (selected) cls.push("sel");
+          if (b.isPast && canCatchup(c, b.programme, now)) cls.push("catchup");
+          const bell = !b.isPast && (pa.reminded(c, b.programme) || pa.scheduled(c, b.programme));
           return (
             <div
               key={b.programme.start}
@@ -379,11 +385,14 @@ export function Guide({ initialChip }: { initialChip?: string }) {
               data-ui="programme"
               style={b.isNow ? ({ left: CHW + b.left, width: b.width, "--elapsed": `${Math.max(0, xNow - b.left)}px` } as React.CSSProperties) : { left: CHW + b.left, width: b.width }}
               onClick={() => select(i, b.programme)}
-              onDoubleClick={() => (b.isNow ? play(c) : undefined)}
+              onDoubleClick={() => (b.isNow ? play(c) : canCatchup(c, b.programme, Date.now()) ? pa.watchFromStart(c, b.programme) : undefined)}
               title={`${b.programme.title} · ${timeRange(b.programme.start, b.programme.stop)}`}
             >
               <span className="gp-sticky" style={{ left: CHW + 10 }}>
-                <b>{b.programme.title}</b>
+                <b>
+                  {bell ? <Icon name={pa.scheduled(c, b.programme) ? "rec" : "bell"} className="gp-mark" /> : null}
+                  {b.programme.title}
+                </b>
                 <span>{timeRange(b.programme.start, b.programme.stop)}</span>
               </span>
             </div>
@@ -417,6 +426,21 @@ export function Guide({ initialChip }: { initialChip?: string }) {
                 {!info || isLive(info) ? (
                   <button type="button" className="btn small pri" onClick={() => play(selChannel)}>
                     <Icon name="play" /> Watch live
+                  </button>
+                ) : null}
+                {info && canCatchup(selChannel, info, now) ? (
+                  <button type="button" className={isLive(info) ? "btn small" : "btn small pri"} onClick={() => pa.watchFromStart(selChannel, info)}>
+                    <Icon name="restart" /> {isLive(info) ? "From start" : "Watch"}
+                  </button>
+                ) : null}
+                {info && info.start > now ? (
+                  <button type="button" className={pa.reminded(selChannel, info) ? "btn small on" : "btn small"} aria-pressed={pa.reminded(selChannel, info)} onClick={() => pa.remind(selChannel, info)}>
+                    <Icon name="bell" /> {pa.reminded(selChannel, info) ? "Reminder set" : "Remind me"}
+                  </button>
+                ) : null}
+                {info && info.stop > now ? (
+                  <button type="button" className={pa.scheduled(selChannel, info) ? "btn small on" : "btn small"} aria-pressed={pa.scheduled(selChannel, info)} onClick={() => void pa.record(selChannel, info)}>
+                    <Icon name="rec" /> {pa.scheduled(selChannel, info) ? "Will record" : "Record"}
                   </button>
                 ) : null}
                 {selProgs && selProgs.length === 0 ? (
