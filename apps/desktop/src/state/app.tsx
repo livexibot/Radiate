@@ -84,6 +84,7 @@ function initialStack(): Route[] | null {
     search: { name: "search" },
     settings: { name: "settings" },
     appearance: { name: "settings", section: "appearance" },
+    recordings: { name: "settings", section: "recordings" },
     onboarding: { name: "onboarding" },
   };
   return simple[h] ? [simple[h]] : null;

@@ -594,7 +594,7 @@ export function Player({ route }: { route: PlayerRoute }) {
 
   const prog = nn?.now ?? null;
   const next = nn?.next ?? null;
-  const title = isChannel ? (prog?.title ?? channel?.name ?? "") : state.status === "ready" ? state.stream.title : (route.title ?? "");
+  const title = isChannel ? (prog?.title ?? channel?.name ?? "") : isCatchup && route.title ? route.title : state.status === "ready" ? state.stream.title : (route.title ?? "");
   const showChrome = chrome || keepChrome;
   const [zapVisible, setZapVisible] = useState(false);
   useEffect(() => {

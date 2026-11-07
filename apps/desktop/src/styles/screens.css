@@ -557,3 +557,4 @@
 .set-form { display: grid; gap: var(--sp-4); }
 .more-btn { justify-self: start; }
 .grow-set > .icon { color: var(--c-text-3); flex: none; }
+.set-row:has(.set-path) > span:first-child { flex: none; }

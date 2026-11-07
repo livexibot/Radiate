@@ -297,7 +297,7 @@ messages back up as `{ radiate: "yt", data }`.
 | command | args | returns |
 | --- | --- | --- |
 | `sources_list` | | `Source[]` |
-| `source_add` | `{ input: NewSource }` | `Source` (NewSource JSON: `{ kind: "m3u", name, url, epgUrls }` or `{ kind: "xtream", name, server, username, password, epgUrls }`) |
+| `source_add` | `{ input: NewSource }` | `Source` (NewSource JSON: `{ kind: "m3u", name, url, epgUrls, userAgent? }` or `{ kind: "xtream", name, server, username, password, epgUrls, userAgent? }`) |
 | `source_update` | `{ id, patch }` | `Source` |
 | `source_remove` | `{ id }` | |
 | `source_refresh` | `{ id }` | `Source` |
@@ -322,7 +322,7 @@ messages back up as `{ radiate: "yt", data }`.
 | `progress_set` | `{ itemId, positionSecs, durationSecs }` | |
 | `continue_watching` | `{ limit }` | `VodItem[]` |
 | `search_all` | `{ query, limit }` | `SearchResults` |
-| `play_start` | `{ target: PlayTarget, ignoreProviderCount?: boolean }` | `{ sessionId, url, kind, title, convertUrl }` (`convertUrl`: the stream converted by ffmpeg, or null without it) or error `{ code: "connection_limit", message, sourceId, limit, inUse, sessions: SessionInfo[], external }` |
+| `play_start` | `{ target: PlayTarget, ignoreProviderCount?: boolean }` (PlayTarget may be `{ type: "catchup", id, start, stop }`, ms, for a channel with `catchupDays`) | `{ sessionId, url, kind, title, convertUrl }` (`convertUrl`: the stream converted by ffmpeg, or null without it) or error `{ code: "connection_limit", message, sourceId, limit, inUse, sessions: SessionInfo[], external }` |
 | `play_stop` | `{ sessionId }` | |
 | `connections_status` | | `ConnectionUsage[]` |
 | `prefs_get` | | `Prefs` |
@@ -338,11 +338,25 @@ messages back up as `{ radiate: "yt", data }`.
 | `reactor_window_open` | `{ key?, videoId?, channelId?, title, rect: { x, y, w, h } }` | opens youtube.com's page for the video (or the channel's live page) in the reactor's own window (`youtube-<key>`) over `rect` (CSS pixels of the main window), or moves the open one there. The window shows only youtube.com and Google sign-in pages; other links open in the browser. It has no access to Radiate's commands and closes with the main window |
 | `reactor_window_place` | `{ key?, rect }` | `boolean`: moves the reactor's window (without a key, any open one) over `rect`; false when it isn't open |
 | `reactor_window_close` | `{ key? }` | closes the reactor's window, or without a key all of them |
+| `opentv_find` | `{ path? }` | `OpenTvSummary \| null`: open-tv's library in its usual place (or at `path`): `{ path, sources: [{ name, kind, detail, enabled }], favorites, customChannels }`, no passwords |
+| `opentv_import` | `{ path? }` | `{ added, skipped: [{ name, reason }], favorites, hidden, customChannels }`; sources Radiate already has are skipped |
+| `custom_channels_get` | | `CustomChannel[]` (`{ name, url, group?, logo?, userAgent?, referrer?, origin? }`) |
+| `custom_channels_set` | `{ list }` | `Source \| null`: the "My channels" source, created, refreshed or removed to match |
+| `record_start` | `{ sessionId, title }` | `ActiveRecording`: records the stream that session already plays |
+| `record_stop` | `{ sessionId }` | (a recording without watching also closes its session) |
+| `record_channel` | `{ target, title?, until? }` | `ActiveRecording`: records without watching, until `until` (ms) or stopped |
+| `recordings_active` | | `ActiveRecording[]` (`{ sessionId, title, path, bytes, startedAt, background, until }`) |
+| `recordings_list` | | `RecordingFile[]` (`{ path, name, bytes, modified }`), newest first |
+| `recordings_folder` | | the folder (`prefs.recordingsDir`, else Videos/Radiate) |
+| `open_path` | `{ path? }` | opens a recording, or the folder, with the system's app; only files in the recordings folder |
 
 Events (`listen`): `source-progress` (Progress), `source-updated` (Source),
 `stream-health` / `stream-failed` / `stream-closed` (StreamEvent payloads,
 camelCase), `connections-changed` (ConnectionUsage[]), `reactor-window`
-(`{ key, open: false }` when a reactor's YouTube window closes).
+(`{ key, open: false }` when a reactor's YouTube window closes),
+`recordings-changed` (ActiveRecording[]), `recording-saved`
+(`{ path, bytes }`), `sources-changed` (a source was added or removed
+behind the UI's back, e.g. My channels).
 
 ## 4. UI (apps/desktop/src)
 

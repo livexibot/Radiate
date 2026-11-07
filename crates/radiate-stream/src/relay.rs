@@ -194,7 +194,11 @@ impl Session {
     }
 
     pub(crate) fn recording(&self) -> Option<crate::record::RecordingInfo> {
-        self.recorder.lock().unwrap().as_ref().map(|r| r.info(&self.id))
+        self.recorder
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|r| r.info(&self.id))
     }
 
     fn record_stream(&self, b: &[u8]) {

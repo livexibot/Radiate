@@ -7,6 +7,8 @@ Standard library only (ffmpeg is used for the live streams). Serves:
                       live / vod / series categories and lists, get_series_info
   /xmltv.php          a guide for the live channels around now
   /live/U/P/ID.ts     real-time MPEG-TS (one ffmpeg -re per viewer, looped)
+  /timeshift/U/P/MIN/YYYY-MM-DD:HH-MM/ID.ts  catch-up of the first channel: a finite
+                      MPEG-TS as fast as it can be sent (at most 20 s of picture)
   /live/U/P/ID.m3u8   a live sliding-window HLS playlist (absolute segment paths)
   /movie/U/P/ID.EXT   mp4 (faststart and moov-at-end), mkv, and an HLS VOD
   /series/U/P/ID.mp4  episodes
@@ -170,7 +172,7 @@ def api(action: str | None, q: dict) -> object:
             {
                 "num": i + 1, "name": name, "stream_type": "live", "stream_id": sid,
                 "stream_icon": "", "epg_channel_id": epg, "added": "1700000000",
-                "category_id": cat, "tv_archive": 0, "tv_archive_duration": 0,
+                "category_id": cat, "tv_archive": 1 if i == 0 else 0, "tv_archive_duration": 3 if i == 0 else 0,
             }
             for i, (sid, name, cat, _f, epg) in enumerate(LIVE)
         ]
@@ -325,6 +327,7 @@ class Handler(BaseHTTPRequestHandler):
         entry = {
             "t": round(time.time(), 3), "method": self.command, "path": self.path.split("?")[0],
             "range": self.headers.get("Range"), "port": self.client_address[1], "status": status,
+            "ua": self.headers.get("User-Agent"),
         }
         with LOCK:
             STATS["requests"].append(entry)
@@ -365,6 +368,15 @@ class Handler(BaseHTTPRequestHandler):
                 if not self.claim_media():
                     return
                 return self.send_file(os.path.join(ARGS.run_dir, "hls", os.path.basename(path)), rate=None)
+            t = re.fullmatch(r"/timeshift/([^/]+)/([^/]+)/(\d+)/(\d{4}-\d\d-\d\d:\d\d-\d\d)/(\d+)\.ts", path)
+            if t:
+                user, pw, minutes, start, sid_s = t.groups()
+                if not self.creds_ok(user, pw):
+                    self.note(401)
+                    return self.send_bytes(401, b"unauthorized", "text/plain")
+                if not self.claim_media():
+                    return
+                return self.timeshift(int(minutes), start, sid_s)
             m = re.fullmatch(r"/(live|movie|series)/([^/]+)/([^/]+)/([^/]+)", path)
             if not m:
                 return self.send_bytes(404, b"not found", "text/plain")
@@ -381,6 +393,33 @@ class Handler(BaseHTTPRequestHandler):
             return self.episode(name)
         except (BrokenPipeError, ConnectionResetError):
             self.close_connection = True
+
+    def timeshift(self, minutes: int, start: str, sid_s: str) -> None:
+        if not LIVE or str(LIVE[0][0]) != sid_s:
+            self.note(404, "no archive")
+            return self.send_bytes(404, b"no archive", "text/plain")
+        self.note(200, f"timeshift {minutes} min from {start}")
+        self.send_response(200)
+        self.send_header("Content-Type", "video/mp2t")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+        if self.command == "HEAD":
+            return
+        secs = str(min(minutes * 60, 20))
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-stream_loop", "-1",
+            "-i", os.path.join(ARGS.media, LIVE[0][3]), "-t", secs, "-c", "copy", "-f", "mpegts", "pipe:1",
+        ]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+        try:
+            while True:
+                chunk = proc.stdout.read1(65536) if proc.stdout else b""
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+        finally:
+            proc.kill()
 
     def live(self, name: str) -> None:
         sid_s, _, ext = name.partition(".")

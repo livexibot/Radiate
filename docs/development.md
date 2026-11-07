@@ -177,6 +177,35 @@ page.
   steps; none of them will open streams, see logins or change connection
   counts.
 
+## Decisions (7 November 2026, 0.7.0)
+
+- The owner had gone back to open-tv and asked for Radiate to replace it
+  completely. Radiate stays its own app (open-tv is GPL-3; nothing of its
+  code is used) and reads open-tv's library only to move in: sources with
+  their user agents, favourites, hidden channels and groups (matched by
+  name), and custom channels, which become the "My channels" source (a
+  local M3U written by Radiate). Passwords are read from open-tv's database
+  and go straight into the keychain; summaries never include them.
+- A user agent per source (`sources.user_agent`), sent on the playlist,
+  the account calls and every stream unless the playlist sets its own.
+- Changing channel no longer computes every source's counts first: the
+  provider's in-use count is still asked (it shows the "in use on another
+  device" card), reading only that source, and gives up after 2.5 s.
+- Catch-up: Xtream `tv_archive` and M3U `catchup` / `catchup-source`
+  (default, append, shift, flussonic, xc). Xtream timeshift links use the
+  account's time zone. A catch-up stream is finite, so the relay doesn't
+  reconnect at its end. It counts against the limit like any stream.
+- Recording is a tee in the relay: the bytes the player already receives
+  are written to a `.ts` file (HLS: whole segments, each once), then
+  remuxed to MP4 with the bundled ffmpeg (stream copy; the `.ts` is kept if
+  that fails). Recording without watching opens a relay session read by an
+  ffmpeg that discards the output, so it counts as one connection and the
+  limit card applies. Scheduled recordings and reminders live in prefs and
+  run while Radiate is open (2 minutes early, 5 minutes late).
+- Playlists older than a day refresh in the background. "Play in mpv" sends
+  every channel to mpv through the relay; Radiate also finds the mpv that
+  open-tv installs.
+
 ## Layout
 
 ```
@@ -216,8 +245,8 @@ fixtures/               invented playlists, guides and Xtream replies for tests
 ## Known gaps after the first release
 
 - Not tried yet against a real provider, on Windows or macOS, or with mpv.
-- Catch-up, reminders, recording, Stalker portals, QR onboarding, profiles
-  and sync are later releases .
+- Stalker portals, QR onboarding, profiles and sync are later releases.
+  Reminders and scheduled recordings only fire while Radiate is running.
 - Guides download in full on every refresh (no ETag).
 - Reactors have not been tried against the real YouTube player (it is
   unreachable from the build machine): the page, the box, the menu and

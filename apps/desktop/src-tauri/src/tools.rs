@@ -38,7 +38,13 @@ fn common_locations() -> Vec<PathBuf> {
             v.push(local.join("mpv").join("mpv.exe"));
             for app in ["Fred TV", "Open TV", "open-tv"] {
                 v.push(local.join(app).join("deps").join("mpv.exe"));
-                v.push(local.join("Programs").join(app).join("deps").join("mpv.exe"));
+                v.push(
+                    local
+                        .join("Programs")
+                        .join(app)
+                        .join("deps")
+                        .join("mpv.exe"),
+                );
             }
             v.push(
                 local

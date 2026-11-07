@@ -4,9 +4,9 @@
 mod background;
 mod commands;
 mod error;
+mod recording;
 mod secrets;
 mod state;
-mod recording;
 mod tools;
 mod updater;
 mod youtube;

@@ -862,13 +862,28 @@ async fn records_what_the_player_reads() {
     let path = dir.path().join("hls.ts");
     hub.start_recording(&s.id, &path).unwrap();
     let c = client();
-    let master = c.get(&s.local_url).send().await.unwrap().text().await.unwrap();
-    let variant = master.lines().find(|l| l.contains("media.m3u8")).unwrap().to_string();
+    let master = c
+        .get(&s.local_url)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let variant = master
+        .lines()
+        .find(|l| l.contains("media.m3u8"))
+        .unwrap()
+        .to_string();
     let media = c.get(&variant).send().await.unwrap().text().await.unwrap();
     for line in media.lines().filter(|l| l.starts_with("http")) {
         let _ = c.get(line).send().await.unwrap().bytes().await;
     }
-    let seg1 = media.lines().find(|l| l.contains("seg1.ts")).unwrap().to_string();
+    let seg1 = media
+        .lines()
+        .find(|l| l.contains("seg1.ts"))
+        .unwrap()
+        .to_string();
     let _ = c.get(&seg1).send().await.unwrap().bytes().await;
     let key = media
         .split("URI=\"")
@@ -890,7 +905,9 @@ async fn records_what_the_player_reads() {
     }
 
     // Live MPEG-TS: what the player reads, until the session closes.
-    let live = hub.open(req("s1", format!("{base}/live.ts"), Some(2))).unwrap();
+    let live = hub
+        .open(req("s1", format!("{base}/live.ts"), Some(2)))
+        .unwrap();
     let path = dir.path().join("live.ts");
     hub.start_recording(&live.id, &path).unwrap();
     let mut resp = c.get(&live.local_url).send().await.unwrap();

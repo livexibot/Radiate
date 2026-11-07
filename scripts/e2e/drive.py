@@ -23,6 +23,7 @@ import base64
 import json
 import os
 import shutil
+import sqlite3
 import signal
 import subprocess
 import sys
@@ -357,6 +358,16 @@ def http_text(url: str) -> str:
         return r.read().decode()
 
 
+def ffprobe(path: str) -> tuple[float, set[str]]:
+    """(duration in seconds, stream types) of a media file."""
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration:stream=codec_type", "-of", "json", path],
+        capture_output=True, text=True,
+    ).stdout
+    j = json.loads(out or "{}")
+    return float(j.get("format", {}).get("duration") or 0), {x["codec_type"] for x in j.get("streams", [])}
+
+
 def provider_stats(port: int) -> dict:
     return http("GET", f"http://127.0.0.1:{port}/_stats", timeout=5)
 
@@ -417,6 +428,183 @@ class Run:
         self.s.wait("movie page", lambda: self.s.exists(xp_text("h1", name)), timeout=15)
 
     # scenarios
+    def movein(self) -> None:
+        """Moving in from open-tv on a first run: its Xtream source with its user agent, a favourite,
+        a hidden channel and a custom channel come across, and the provider sees the user agent."""
+        r = self.r
+        if self.s.invoke("sources_list"):
+            r.note("movein needs empty app data (up --fresh); skipped")
+            return
+        port = self.args.port
+        db_path = os.path.join(self.args.run_dir, "xdg", "data", "open-tv", "db.sqlite")
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        if os.path.exists(db_path):
+            os.remove(db_path)
+        db = sqlite3.connect(db_path)
+        db.executescript(
+            "CREATE TABLE sources (id INTEGER PRIMARY KEY, name varchar(100), source_type integer, url varchar(500),"
+            " username varchar(100), password varchar(100), enabled integer DEFAULT 1, user_agent varchar(500));"
+            "CREATE TABLE groups (id INTEGER PRIMARY KEY, name varchar(100), source_id integer, hidden integer DEFAULT 0);"
+            "CREATE TABLE channels (id INTEGER PRIMARY KEY, name varchar(100), image varchar(500), url varchar(500),"
+            " media_type integer, source_id integer, favorite integer, group_id integer, hidden integer DEFAULT 0);"
+        )
+        db.execute("INSERT INTO sources (id, name, source_type, url, username, password, user_agent) VALUES (1, 'Fake provider', 2, ?, 'demo', 'secret', 'IPTVSmartersPro')",
+                   (f"http://127.0.0.1:{port}",))
+        db.execute("INSERT INTO sources (id, name, source_type) VALUES (2, 'Custom', 3)")
+        db.execute("INSERT INTO groups (id, name, source_id) VALUES (5, 'Mine', 2)")
+        db.executemany("INSERT INTO channels (name, url, media_type, source_id, favorite, hidden, group_id) VALUES (?, ?, 0, ?, ?, ?, ?)", [
+            ("Arena Sports 2", "x", 1, 1, 0, None),
+            ("Harbor News", "y", 1, 0, 1, None),
+            ("Club cam", f"http://127.0.0.1:{port}/live/demo/secret/101.ts", 2, 0, 0, 5),
+        ])
+        db.commit()
+        db.close()
+        self.home()
+        self.s.wait("move-in offer", lambda: "Move in from open-tv" in self.s.text(), timeout=15)
+        r.ok("1 source" in self.s.text() or "2 sources" in self.s.text(), "onboarding offers to move in from open-tv")
+        self.shot("movein-offer")
+        self.s.click(xp_text("button", "Move in from open-tv"))
+        self.s.wait("move-in list", lambda: self.s.exists(xp_text("button", "Import")), timeout=10)
+        self.s.click(xp_text("button", "Import"))
+        t = self.s.wait("moved in", lambda: (x := self.s.text()) and "Moved in" in x and x, timeout=90)
+        self.shot("movein-done")
+        srcs = self.s.invoke("sources_list") or []
+        prov = next((x for x in srcs if x.get("server", "").endswith(f":{port}")), None)  # type: ignore[union-attr]
+        mine = next((x for x in srcs if x["name"] == "My channels"), None)  # type: ignore[union-attr]
+        r.ok(bool(prov) and prov["kind"] == "xtream" and prov.get("userAgent") == "IPTVSmartersPro" and prov["channelCount"] == 6,
+             f"the provider came across with its user agent: {prov and (prov['name'], prov.get('userAgent'), prov['channelCount'])}")
+        r.ok(bool(mine) and mine["channelCount"] == 1, f"its custom channel is in My channels: {mine and mine['channelCount']}")
+        favs = self.s.invoke("channels_list", {"query": {"favoritesOnly": True, "includeHidden": True, "offset": 0, "limit": 50}})["items"]  # type: ignore[index]
+        hidden = [c["name"] for c in self.s.invoke("channels_list", {"query": {"favoritesOnly": False, "includeHidden": True, "offset": 0, "limit": 50}})["items"] if c["hidden"]]  # type: ignore[index]
+        r.ok([c["name"] for c in favs] == ["Arena Sports 2"] and hidden == ["Harbor News"],
+             f"favourite and hidden channel came across: {[c['name'] for c in favs]}, hidden {hidden}")
+        r.ok("1 favorites" in t and "1 hidden" in t, "the summary counts them")
+        # the relay only goes to the provider once something reads the stream
+        ch = next(c for c in self.s.invoke("channels_list", {"query": {"favoritesOnly": False, "includeHidden": False, "offset": 0, "limit": 10}})["items"] if c["sourceId"] == prov["id"])  # type: ignore[index, union-attr]
+        started = self.s.invoke("play_start", {"target": {"type": "channel", "id": ch["id"]}})
+        try:
+            with urllib.request.urlopen(started["url"], timeout=15) as resp:  # type: ignore[index]
+                resp.read(4096)
+        except Exception as e:
+            r.note(f"reading the relay: {e}")
+        self.s.invoke("play_stop", {"sessionId": started["sessionId"]})  # type: ignore[index]
+        ua = {q.get("ua") for q in provider_stats(port)["requests"] if q["path"].startswith("/live/")}
+        r.ok(ua == {"IPTVSmartersPro"}, f"the provider sees open-tv's user agent on the stream: {ua}")
+        self.s.click(xp_text("button", "Continue"))
+        time.sleep(2)
+        r.ok("Move in from open-tv" not in self.s.text(), "Continue goes on into the app")
+        self.s.invoke("prefs_set", {"patch": {"onboarded": True}})
+        # leave the library as the other scenarios expect it
+        for c in favs:
+            self.s.invoke("channel_set_favorite", {"id": c["id"], "favorite": False})
+        for c in self.s.invoke("channels_list", {"query": {"favoritesOnly": False, "includeHidden": True, "offset": 0, "limit": 50}})["items"]:  # type: ignore[index]
+            if c["hidden"]:
+                self.s.invoke("channel_set_hidden", {"id": c["id"], "hidden": False})
+        self.s.invoke("custom_channels_set", {"list": []})
+        self.s.invoke("source_update", {"id": prov["id"], "patch": {"userAgent": None}})  # type: ignore[index]
+
+    def record(self) -> None:
+        """Recording while watching (one connection, the picture keeps playing), recording without
+        watching until a set time, and both saved as MP4 files with picture and sound."""
+        r = self.r
+        port = self.args.port
+        rec_dir = os.path.join(self.args.run_dir, "recordings")
+        shutil.rmtree(rec_dir, ignore_errors=True)
+        os.makedirs(rec_dir)
+        self.s.invoke("prefs_set", {"patch": {"recordingsDir": rec_dir, "liveFormat": "ts", "latency": "low"}})
+        chans = self.s.invoke("channels_list", {"query": {"favoritesOnly": False, "includeHidden": False, "offset": 0, "limit": 10}})["items"]  # type: ignore[index]
+        prov_chans = [c for c in chans if c["name"] != "Club cam"]
+        ch = prov_chans[1]
+        self.watch(ch["id"])
+        self.wait_playing(min_t=1, timeout=40)
+        self.s.key("c")
+        self.s.wait("REC badge", lambda: "REC" in self.s.text(), timeout=10)
+        active = self.s.invoke("recordings_active") or []
+        r.ok(len(active) == 1 and not active[0]["background"], f"C starts recording the channel being watched: {[(a['title'], a['background']) for a in active]}")  # type: ignore[index]
+        self.shot("record-badge")
+        ours, prov, _ = self.in_use()
+        r.ok(ours == 1 and prov == 1, f"recording while watching uses the same connection: app {ours}, provider {prov}")
+        t0 = self.s.video()["t"]  # type: ignore[index]
+        time.sleep(8)
+        t1 = self.s.video()["t"]  # type: ignore[index]
+        r.ok(t1 - t0 > 6, f"the picture keeps playing while recording ({round(t1 - t0, 1)} s in 8 s)")
+        self.s.key("c")
+        f = self.s.wait("saved file", lambda: next((os.path.join(rec_dir, n) for n in os.listdir(rec_dir) if n.endswith(".mp4")), None), timeout=30)
+        time.sleep(1)
+        d, streams = ffprobe(f)
+        r.ok(d >= 5 and "video" in streams and "audio" in streams, f"saved as MP4 with picture and sound: {os.path.basename(f)}, {d:.1f} s, {sorted(streams)}")
+        r.ok(not any(n.endswith(".ts") for n in os.listdir(rec_dir)), "no leftover .ts once remuxed")
+        self.s.wait("Recording saved toast", lambda: "Recording saved" in self.s.text() or "saved" in self.s.text().lower(), timeout=10)
+        self.leave_player()
+
+        # without watching, until a set time
+        before = set(os.listdir(rec_dir))
+        until = int(time.time() * 1000) + 9000
+        self.s.invoke("record_channel", {"target": {"type": "channel", "id": prov_chans[2]["id"]}, "title": "Background test", "until": until})
+        time.sleep(2)
+        ours, prov, _ = self.in_use()
+        r.ok(ours == 1 and prov == 1, f"recording without watching takes one connection: app {ours}, provider {prov}")
+        self.go("")
+        r.ok(self.s.exists("//button[contains(@class,'rec-pill')]"), "the top bar shows REC while it records")
+        f2 = self.s.wait("background file", lambda: next((os.path.join(rec_dir, n) for n in os.listdir(rec_dir) if n not in before and n.endswith(".mp4")), None), timeout=40)
+        time.sleep(1)
+        d2, streams2 = ffprobe(f2)
+        r.ok(5 <= d2 <= 16 and "video" in streams2, f"stopped by itself at the set time: {os.path.basename(f2)}, {d2:.1f} s")
+        time.sleep(2)
+        ours, prov, _ = self.in_use()
+        r.ok(ours == 0 and prov == 0, f"and let go of the connection: app {ours}, provider {prov}")
+        files = self.s.invoke("recordings_list") or []
+        r.ok(len(files) == 2, f"Settings lists both recordings: {[x['name'] for x in files]}")  # type: ignore[index]
+        self.go("recordings")
+        time.sleep(1)
+        self.shot("record-settings")
+        self.s.invoke("prefs_set", {"patch": {"latency": "normal"}})
+
+    def catchup(self) -> None:
+        """A programme from earlier on a channel with an archive plays from its start through the
+        provider's timeshift link, with the account's time zone, and ends instead of reconnecting."""
+        r = self.r
+        port = self.args.port
+        chans = self.s.invoke("channels_list", {"query": {"favoritesOnly": False, "includeHidden": False, "offset": 0, "limit": 10}})["items"]  # type: ignore[index]
+        arch = [c for c in chans if c.get("catchupDays")]
+        r.ok(len(arch) == 1 and arch[0]["catchupDays"] == 3, f"the archive channel is marked: {[(c['name'], c.get('catchupDays')) for c in arch]}")
+        if not arch:
+            return
+        now = int(time.time() * 1000)
+        start, stop = now - 40 * 60_000, now - 25 * 60_000
+        started = self.s.invoke("play_start", {"target": {"type": "catchup", "id": arch[0]["id"], "start": start, "stop": stop}})
+        try:
+            with urllib.request.urlopen(started["url"], timeout=15) as resp:  # type: ignore[index]
+                resp.read(4096)
+        except Exception as e:
+            r.note(f"reading the relay: {e}")
+        reqs = [q for q in provider_stats(port)["requests"] if q["path"].startswith("/timeshift/")]
+        r.ok(bool(reqs) and "/timeshift/demo/secret/15/" in reqs[-1]["path"], f"asks the provider's timeshift link: {reqs[-1]['path'] if reqs else None}")
+        self.s.invoke("play_stop", {"sessionId": started["sessionId"]})  # type: ignore[index]
+        try:
+            self.s.invoke("play_start", {"target": {"type": "catchup", "id": arch[0]["id"], "start": now + 3_600_000, "stop": now + 7_200_000}})
+            r.ok(False, "a programme that hasn't started can't be watched from the start")
+        except RuntimeError as e:
+            r.ok(True, f"a programme that hasn't started is refused in plain words: {str(e)[:90]}")
+        # through the player: T on a live channel with an archive
+        self.s.invoke("prefs_set", {"patch": {"liveFormat": "ts"}})
+        self.watch(arch[0]["id"])
+        self.wait_playing(min_t=1, timeout=40)
+        can = self.s.exists(xp_text("button", "From start"))
+        r.ok(can, "the player offers From start on an archive channel")
+        if can:
+            self.s.key("t")
+            self.s.wait("catch-up playing", lambda: (v := self.s.video()) and v["t"] > 1 and self.s.exists(xp_text("button", "Live")) and v, timeout=40)
+            self.shot("catchup")
+            r.ok(True, "T plays the programme from its start, with Live to go back")
+            self.s.click(xp_text("button", "Live"))
+            self.wait_playing(min_t=1, timeout=40)
+            r.ok(not self.s.exists(xp_text("button", "Live")) or self.s.exists(xp_text("button", "From start")), "Live goes back to the live channel")
+        self.leave_player()
+        ours, prov, _ = self.in_use()
+        time.sleep(1)
+        r.ok(provider_stats(port)["peak"] <= self.args.max and not provider_stats(port)["refused"], "provider limit never exceeded")
+
     def source(self) -> None:
         r = self.r
         srcs = self.s.invoke("sources_list") or []
@@ -1252,7 +1440,7 @@ class Run:
         r.ok(not st["refused"] and st["peak"] <= 2, f"provider limit never exceeded (peak {st['peak']}, refused {len(st['refused'])})")
 
 
-SCENARIOS = ["source", "launch", "movies", "seek", "resume", "hlsvod", "mkv", "convert", "series", "live", "rewind", "search", "reactor", "limit", "stall"]
+SCENARIOS = ["movein", "source", "launch", "movies", "seek", "resume", "hlsvod", "mkv", "convert", "series", "live", "rewind", "search", "reactor", "record", "catchup", "limit", "stall"]
 
 
 def run(args: argparse.Namespace) -> None:

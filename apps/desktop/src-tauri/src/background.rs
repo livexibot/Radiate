@@ -93,7 +93,10 @@ pub fn keep_guides_fresh(app: AppHandle, core: Arc<Core>) {
                 .sources()
                 .map(|v| {
                     v.into_iter()
-                        .filter(|s| s.last_refreshed.is_some_and(|t| now_ms() - t >= 24 * 3_600_000))
+                        .filter(|s| {
+                            s.last_refreshed
+                                .is_some_and(|t| now_ms() - t >= 24 * 3_600_000)
+                        })
                         .map(|s| s.id)
                         .collect()
                 })

@@ -41,12 +41,13 @@ pub struct RecordingFile {
     pub modified: i64,
 }
 
+/// Title, background stop signal and end of one recording.
+type Running = (String, Option<oneshot::Sender<()>>, Option<i64>);
+
 #[derive(Default)]
 pub struct Recordings {
-    /// Title, background stop signal and end, by session id.
-    pub running: std::sync::Mutex<
-        std::collections::HashMap<String, (String, Option<oneshot::Sender<()>>, Option<i64>)>,
-    >,
+    /// By session id.
+    pub running: std::sync::Mutex<std::collections::HashMap<String, Running>>,
 }
 
 fn now_ms() -> i64 {
@@ -62,7 +63,10 @@ pub fn recordings_dir(app: &AppHandle) -> PathBuf {
         if let Ok(p) = state.core.prefs() {
             if let Some(dir) = serde_json::to_value(&p)
                 .ok()
-                .and_then(|v| v.get("recordingsDir").and_then(|d| d.as_str().map(str::to_string)))
+                .and_then(|v| {
+                    v.get("recordingsDir")
+                        .and_then(|d| d.as_str().map(str::to_string))
+                })
                 .filter(|d| !d.trim().is_empty())
             {
                 return PathBuf::from(dir);
@@ -155,7 +159,8 @@ pub fn emit_changed(app: &AppHandle) {
 /// make the MP4, tell the UI.
 pub fn on_stopped(app: &AppHandle, rec: RecordingInfo) {
     let ffmpeg = app.try_state::<AppState>().and_then(|s| {
-        if let Some((_, Some(tx), _)) = s.recordings.running.lock().unwrap().remove(&rec.session_id) {
+        if let Some((_, Some(tx), _)) = s.recordings.running.lock().unwrap().remove(&rec.session_id)
+        {
             let _ = tx.send(());
         }
         s.ffmpeg.clone()
@@ -186,13 +191,30 @@ async fn finish_file(ffmpeg: Option<&Path>, ts: &Path) -> PathBuf {
     };
     let mp4 = ts.with_extension("mp4");
     let mut cmd = tokio::process::Command::new(ffmpeg);
-    cmd.args(["-hide_banner", "-loglevel", "error", "-y", "-fflags", "+genpts", "-i"])
-        .arg(ts)
-        .args(["-map", "0:v?", "-map", "0:a?", "-c", "copy", "-movflags", "+faststart"])
-        .arg(&mp4)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+    cmd.args([
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-fflags",
+        "+genpts",
+        "-i",
+    ])
+    .arg(ts)
+    .args([
+        "-map",
+        "0:v?",
+        "-map",
+        "0:a?",
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+    ])
+    .arg(&mp4)
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::null());
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000);
     match cmd.status().await {
@@ -230,7 +252,11 @@ pub async fn record_start(
 }
 
 #[tauri::command]
-pub async fn record_stop(app: AppHandle, state: State<'_, AppState>, session_id: String) -> CmdResult<()> {
+pub async fn record_stop(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+) -> CmdResult<()> {
     let background = matches!(
         state.recordings.running.lock().unwrap().get(&session_id),
         Some((_, Some(_), _))
@@ -267,7 +293,9 @@ pub async fn record_channel(
     };
     let started = crate::commands::open_session(&app, &state, target, false).await?;
     let id = started.session_id.clone();
-    let title = title.filter(|t| !t.trim().is_empty()).unwrap_or(started.title.clone());
+    let title = title
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or(started.title.clone());
     let path = new_path(&app, &title);
     if let Err(e) = state.hub.start_recording(&id, &path) {
         state.hub.close(&id);
@@ -301,7 +329,10 @@ pub async fn record_channel(
         Err(e) => {
             tracing::warn!("couldn't start the recorder: {e}");
             state.hub.close(&id);
-            return Err(CmdError::new("record_failed", "The recording couldn't start."));
+            return Err(CmdError::new(
+                "record_failed",
+                "The recording couldn't start.",
+            ));
         }
     };
     let (tx, rx) = oneshot::channel::<()>();
@@ -371,7 +402,7 @@ pub async fn recordings_list(app: AppHandle) -> CmdResult<Vec<RecordingFile>> {
             });
         }
     }
-    out.sort_by(|a, b| b.modified.cmp(&a.modified));
+    out.sort_by_key(|f| std::cmp::Reverse(f.modified));
     Ok(out)
 }
 

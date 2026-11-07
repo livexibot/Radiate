@@ -146,6 +146,16 @@ impl Core {
             return Err(Error::Invalid("This programme hasn't started yet.".into()));
         }
         let source = load_source(&conn, &source_id)?;
+        // The programme's own title when the guide has it.
+        let title = conn
+            .query_row(
+                "SELECT p.title FROM programmes p JOIN channels c ON p.channel = c.epg_channel_id \
+                 WHERE c.id = ?1 AND p.start <= ?2 AND p.stop > ?2 ORDER BY p.start DESC LIMIT 1",
+                params![id, start],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?
+            .unwrap_or(name);
         drop(conn);
         let w = crate::catchup::Window {
             start: start / 1000,
@@ -167,7 +177,7 @@ impl Core {
         Ok(ResolvedStream {
             kind_hint: StreamKind::from_url(&upstream_url),
             upstream_url,
-            title: name,
+            title,
             limit: source.effective_limit(),
             headers: parse_headers(headers),
             source_id,

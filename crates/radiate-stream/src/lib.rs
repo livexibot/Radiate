@@ -430,11 +430,14 @@ impl StreamHub {
 
     /// Start writing what the session plays to `path` (MPEG-TS). Replaces
     /// a recording already running on the session.
-    pub fn start_recording(&self, session_id: &str, path: &std::path::Path) -> std::io::Result<RecordingInfo> {
-        let s = self
-            .inner
-            .session(session_id)
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "This stream has stopped."))?;
+    pub fn start_recording(
+        &self,
+        session_id: &str,
+        path: &std::path::Path,
+    ) -> std::io::Result<RecordingInfo> {
+        let s = self.inner.session(session_id).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "This stream has stopped.")
+        })?;
         let rec = record::Recorder::create(path)?;
         let info = rec.info(session_id);
         if let Some(old) = s.set_recorder(rec) {
@@ -458,7 +461,14 @@ impl StreamHub {
 
     /// Recordings running now.
     pub fn recordings(&self) -> Vec<RecordingInfo> {
-        let sessions: Vec<_> = self.inner.sessions.lock().unwrap().values().cloned().collect();
+        let sessions: Vec<_> = self
+            .inner
+            .sessions
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect();
         sessions.iter().filter_map(|s| s.recording()).collect()
     }
 

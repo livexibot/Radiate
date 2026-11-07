@@ -147,7 +147,7 @@ impl Core {
                 }
                 _ => continue,
             };
-            let added = match self.add_source(input, |p| progress(p)).await {
+            let added = match self.add_source(input, &progress).await {
                 Ok(s) => s,
                 Err(e) => {
                     skip(&mut report, &e.to_string());
@@ -181,7 +181,7 @@ impl Core {
             }
             report.custom_channels = (list.len() - before) as u32;
             if report.custom_channels > 0 {
-                if let Err(e) = self.set_custom_channels(list, |p| progress(p)).await {
+                if let Err(e) = self.set_custom_channels(list, progress).await {
                     report.skipped.push(ImportSkip {
                         name: custom::SOURCE_NAME.into(),
                         reason: e.to_string(),

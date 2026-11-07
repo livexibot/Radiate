@@ -6,9 +6,9 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use radiate_core::{
-    CustomChannel, Channel, ChannelQuery, ContentKind, Core, EpgCandidate, Group, NewSource, NowNext, Page,
-    PlayTarget, Prefs, Programme, SearchResults, SeriesInfo, Source, SourcePatch, VodItem,
-    VodQuery,
+    Channel, ChannelQuery, ContentKind, Core, CustomChannel, EpgCandidate, Group, NewSource,
+    NowNext, Page, PlayTarget, Prefs, Programme, SearchResults, SeriesInfo, Source, SourcePatch,
+    VodItem, VodQuery,
 };
 use radiate_stream::{ConnectionUsage, OpenError, OpenRequest, StreamKind};
 use serde::Serialize;
@@ -324,14 +324,23 @@ pub(crate) async fn open_session(
 ) -> CmdResult<PlayStarted> {
     let rs = blocking(&state.core, move |c| c.resolve(&target)).await?;
 
-    // The provider's own count used to be asked before every stream, which
-    // cost a round trip to the provider on each channel change, and its
-    // count lags (it keeps counting a stream for a while after it stopped).
-    // Now the stream opens straight away within our own limit, and the
-    // provider decides; the count is only asked when the user wants to know
-    // why a stream was refused (`ignore_provider_count` stays for the card).
-    let _ = ignore_provider_count;
-    let provider_in_use: Option<u32> = None;
+    // The provider's own count, ours included; the hub works out which are
+    // other devices. Only Xtream accounts with a limit are asked (the source
+    // is read by id, nothing else), and a slow panel never holds the picture
+    // up for long.
+    let provider_in_use = if rs.limit.is_some() && !ignore_provider_count {
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(2500),
+            state.core.xtream_active_connections(&rs.source_id),
+        )
+        .await
+        {
+            Ok(Ok(active)) => active,
+            _ => None,
+        }
+    } else {
+        None
+    };
 
     let title = rs.title.clone();
     let opened = state.hub.open(OpenRequest {

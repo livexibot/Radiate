@@ -38,16 +38,27 @@ AppImage, `.deb` or `.rpm` for Linux. Radiate updates itself after that.
   again, up to the last 5 minutes, then forward or straight back to live.
 - **Your sources.** M3U and M3U8 playlists by link or file, Xtream Codes
   logins (live TV, movies and series), and XMLTV guides, gzipped or not.
-  Or try it with free public channels by country.
+  Or try it with free public channels by country. Add single streams by
+  their link under My channels, and set the user agent a provider expects.
+- **Moving in from open-tv.** On first launch Radiate finds open-tv's
+  library and brings over its sources (with their user agents), favorites,
+  hidden channels and groups, and custom channels in one go.
+- **Catch-up and recording.** On channels with an archive, watch a match
+  from the start or an earlier programme from the guide. Record what you're
+  watching on the same connection, record a channel without watching it,
+  or schedule a programme from the guide; recordings are saved as MP4.
+  Set a reminder on a programme and Radiate tells you when it starts.
 - **A real TV guide.** A grid with a now-line and group filters. Nothing
   plays until you open a channel, so browsing never uses one of your
   provider's connections. Channels are matched to the guide by id, by name and by a fuzzy
   score, and "Fix guide" lets you pick the match yourself; it's remembered.
+  Playlists refresh by themselves once a day.
 - **Picture fast.** Playlists of tens of thousands of channels are indexed
   locally in about a second, so lists and the guide never wait for the
-  network. Radiate opens on the channel you watched last.
+  network. Home keeps the channels you watched last.
 - **Zapping like a TV.** Up and down to change channel, type a number,
-  Back twice for the previous channel, Enter for the channel list.
+  Back twice for the previous channel, Enter for the channel list. F1
+  shows every shortcut. Prefer mpv? Turn on Play in mpv.
 - **Movies and series** from Xtream sources in one Library, grouped into
   seasons, with progress, resume and Continue watching.
 - **Multiview.** Up to four channels at once, one big and three small or a
@@ -78,6 +89,9 @@ files, AC-3 or MP2 sound, HEVC or MPEG-2 pictures) are converted on the fly
 by a copy of [FFmpeg](https://ffmpeg.org) that Radiate installs next to
 itself (GPLv3, see [its notice](apps/desktop/src-tauri/licenses/FFMPEG.txt)),
 on the same connection, so they play inside the app.
+
+Recordings are written by that same relay from the stream you are already
+receiving, so recording what you watch never takes a second connection.
 
 Reactors are YouTube's official embedded player, loaded only when you add
 or show one. Radiate never downloads or records YouTube's video.
